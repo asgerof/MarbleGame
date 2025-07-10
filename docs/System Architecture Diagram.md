@@ -25,6 +25,7 @@ Provide a one-page mental map for every engineer: where code lives, how data flo
         │  – Placement Tools                            │
         │  – Upgrade & Cost Rules                       │
         │  – Validation (piece caps, board bounds)      │
+        │  – Adjacency Checker (Module-Connector rule)  │
         └────────────┬────────────────┬─────────────────┘
                      │TrackCmdBuffer  │Load/Save calls
                      ▼                ▼
@@ -63,12 +64,12 @@ Provide a one-page mental map for every engineer: where code lives, how data flo
 | Subsystem           | Key Classes / Interfaces                             | Main Thread? | APIs Exposed                                                                                     |
 | ------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
 | **UI Layer**        | `MainHUD`, `InputRouter`                             | ✔            | Publishes `IUICommand` (place, upgrade, click-action).                                           |
-| **Editor**          | `BoardEditor`, `CostCalc`, `Validator`               | ✔            | Consumes `IUICommand`; emits `TrackCmdBuffer` to Sim; calls `SaveGameService.Save()` / `Load()`. |
-| **Runtime Sim**     | `MarbleMotionSys`, `CollisionSys`, `ModuleSys` (ECS) | ✖ (Jobs)     | Provides read-only `SnapshotBlob` each frame; accepts `TrackCmdBuffer`.                          |
+| **Editor**          | `BoardEditor`, `CostCalc`, `Validator`, `AdjacencyChecker` | ✔            | Consumes `IUICommand`; validates Module-Connector alternation; prevents invalid placement; emits `TrackCmdBuffer` to Sim; calls `SaveGameService.Save()` / `Load()`. |
+| **Runtime Sim**     | `MarbleMotionSys`, `CollisionSys`, `PartSys` (ECS)   | ✖ (Jobs)     | Provides read-only `SnapshotBlob` each frame; accepts `TrackCmdBuffer`.                          |
 | **Asset Streaming** | `AddressableProvider`, `MeshCache`                   | ✖ (IO)       | `IAssetHandle LoadPrefab(string id)`; async awaitable.                                           |
 | **Steam Workshop**  | `WorkshopService`                                    | ✖ (IO)       | `UploadBlueprint`, `DownloadItem`, `RateItem`.                                                   |
 | **Save / Load**     | `SaveGameService`, `ISaveMigrator`                   | ✖ (IO)       | `Save(profile, board)`; returns `Task`.                                                          |
-| **Analytics**       | `AnalyticsLogger`                                    | ✖ (IO)       | `LogEvent(name, params)`; background batch flush.                                                |
+| **Analytics**       | `AnalyticsLogger`                                    | ✖ (IO)       | `LogEvent(name, params)`; background batch flush, tracks invalid placement attempts.             |
 
 ---
 

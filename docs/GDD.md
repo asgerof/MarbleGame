@@ -13,6 +13,8 @@ This document is the single-source rulebook for **Marble Maker**. It captures th
 ## 2. High Concept
 
 > **Build · Roll · Smile** – Snap modular track pieces onto a neat 3-D grid, press **Roll** and watch a stream of marbles snake through lifts, cannons and splitters. Light puzzle progression earns new parts; Sandbox lets creativity flow. Play is calm, predictable and endlessly tweakable.
+> 
+> **Snap & Go** – Tracks alternate Module-Connector-Module for visual clarity and easier timing puzzles.
 
 ---
 
@@ -43,6 +45,7 @@ This document is the single-source rulebook for **Marble Maker**. It captures th
 * **Orientation:** axis-aligned placement; rotations in 90° steps.
 * **Elevation:** ramps change height by 1 cell per horizontal cell (≈ 45° max for generic rails).
 * **Bounds:** board size set by puzzle or chosen freely in Sandbox.
+* **Placement Rule:** A connector must exist between any two modules. Grid cells must alternate **Module → Connector → Module**. No M-M or C-C adjacency.
 
 ### 4.2 Timing & Motion Model
 
@@ -72,13 +75,17 @@ Interaction executes on the next tick, ensuring deterministic results even on va
 
 ## 5. Content Overview (modules & upgrades – **loosely scoped**)
 
-| Tier                  | Example Parts                       | Core Behaviour                               | Upgrade Themes                                                   |
-| --------------------- | ----------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| **Basics**            | Straight, Curve, Ramp Up/Down       | Pure track geometry                          | Higher durability, decorative skins                              |
-| **Motion**            | Lift, Cannon, Booster Strip         | Add / remove velocity                        | Faster speed, longer throw                                       |
-| **Logic**             | 2-Way Splitter, Gate, Sensor Pad    | Route marbles by rule or input               | Lower delay, multiple outputs                                    |
-| **Buffers**           | Collector Node (Basic)              | Release all queued marbles each tick – risky | **Lv 2:** Smart FIFO (single-file), **Lv 3:** Burst-size control |
-| **Whimsy / Cosmetic** | Rainbow Chime Ramp, Confetti Popper | No mechanical effect                         | Particle variations                                              |
+| Tier                  | Example Parts                       | Type        | Core Behaviour                               | Upgrade Themes                                                   |
+| --------------------- | ----------------------------------- | ----------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| **Basics**            | Straight Path                       | Module      | Pure track geometry                          | Higher durability, decorative skins                              |
+| **Basics**            | Curve, Ramp Up/Down, Spiral        | Connector   | Pure track geometry                          | Higher durability, decorative skins                              |
+| **Motion**            | Lift, Cannon, Booster Strip         | Module      | Add / remove velocity                        | Faster speed, longer throw                                       |
+| **Motion**            | Slope, Banked Turn                  | Connector   | Add / remove velocity                        | Faster speed, steeper grade                                      |
+| **Logic**             | 2-Way Splitter, Gate, Sensor Pad    | Module      | Route marbles by rule or input               | Lower delay, multiple outputs                                    |
+| **Logic**             | Junction, Switch Track              | Connector   | Route marbles by rule or input               | Lower delay, multiple outputs                                    |
+| **Buffers**           | Collector Node (Basic)              | Module      | Release all queued marbles each tick – risky | **Lv 2:** Smart FIFO (single-file), **Lv 3:** Burst-size control |
+| **Whimsy / Cosmetic** | Rainbow Chime Ramp, Confetti Popper | Module      | No mechanical effect                         | Particle variations                                              |
+| **Whimsy / Cosmetic** | Decorative Helix, Light Strip       | Connector   | No mechanical effect                         | Particle variations                                              |
 
 **Numbers at launch:** target ≈ 100 unique parts, each with 1–3 upgrade levels.
 Full catalogue is maintained in `Parts_Catalogue.xlsx`.

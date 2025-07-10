@@ -26,7 +26,7 @@ Translate the design rules in the GDD into a concrete, build-ready technical pla
 
 ```
 ┌──────────┐     cellHash( int3 ) ┌──────────┐
-│Cell Graph│  ──────────────────▶ │Module Cmp│
+│Cell Graph│  ──────────────────▶ │Part Cmp  │
 └──────────┘                      └──────────┘
        ▲                               ▲
        │ owns                          │ holds state (splitter, collector,…)
@@ -42,7 +42,7 @@ Translate the design rules in the GDD into a concrete, build-ready technical pla
 | **A. Input Actions**           | `InteractJob`                      | Applies queued click events (splitter toggle, lift pause).                                                                       |
 | **B. Marble Motion**           | `MarbleIntegrateJob` (Burst, SIMD) | For each marble: compute acceleration (gravity/friction), integrate position, clamp terminal speed, accumulate cell transitions. |
 | **C. Collision & Debris**      | `CollisionSweepJob`                | Uses cellHash lookup; if destination occupied by marble or debris → spawn debris & mark marbles "dead".                          |
-| **D. Module Update**           | `ModuleStateJob`                   | Splitters, collectors advance internal state, enqueue/dequeue marbles.                                                           |
+| **D. Part Update**             | `PartStateJob`                     | Splitters, collectors advance internal state, enqueue/dequeue marbles.                                                           |
 | **E. Marble Lifecycle**        | `CompactionJob`                    | Remove dead marbles, append newly spawned ones (cannon, collector output).                                                       |
 
 *Data is stored as **fixed-point int32.32** to avoid FP drift. Job ordering is deterministic; no random functions are used anywhere in the loop.*
@@ -53,10 +53,10 @@ Translate the design rules in the GDD into a concrete, build-ready technical pla
 
 | Asset / Data                       | Format                                           | Notes                                                                                     |
 | ---------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| **Module Definitions**             | **Unity ScriptableObject** (`ModuleDef`)         | Footprint grid, connection sockets, upgrade list, base physics constants, mesh reference. |
-| **Upgrade Variants**               | Nested SO in `ModuleDef`                         | Override fields (e.g., `maxReleasePerTick`).                                              |
+| **Part Definitions**               | **Unity ScriptableObject** (`PartDef`)           | Footprint grid, connection sockets, upgrade list, base physics constants, mesh reference, part type (Module/Connector). |
+| **Upgrade Variants**               | Nested SO in `PartDef`                           | Override fields (e.g., `maxReleasePerTick`).                                              |
 | **Puzzle Boards**                  | Author-time: JSON + PNG preview → imported to SO | Stores board size, pre-placed parts, goal criteria.                                       |
-| **Runtime Tracks (Save/Workshop)** | **JSON.gz** with schema vN                       | List of placements: `{moduleID, level, pos:int3, rot:byte}`.  Easy for diffing & modding. |
+| **Runtime Tracks (Save/Workshop)** | **JSON.gz** with schema vN                       | List of placements: `{partID, level, pos:int3, rot:byte}`.  Easy for diffing & modding. |
 | **Player Profile**                 | Binary Protobuf (`profile.dat`)                  | Currency balances, unlock flags, settings.  Versioned with `major.minor` header.          |
 
 ---

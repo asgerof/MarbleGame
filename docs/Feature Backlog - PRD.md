@@ -16,8 +16,9 @@ Purpose – negotiated "what we're shipping".
 
 * **Priority**: **M**
 * **Acceptance Criteria**:
-  * Player can place, rotate, delete track modules on a 3‑D grid with visual snap feedback.
+  * Player can place, rotate, delete track parts (modules & connectors) on a 3‑D grid with visual snap feedback.
   * Misaligned pieces visibly highlighted in red.
+  * Module-Connector alternation enforced: invalid adjacency (M-M or C-C) prevented and visually indicated.
   * Performance: <10 ms average placement time on Steam Deck.
 * **Dependencies**: None.
 * **KPI Driver**: Onboarding Funnel Completion Rate.
@@ -36,8 +37,9 @@ Purpose – negotiated "what we're shipping".
 
 * **Priority**: **M**
 * **Acceptance Criteria**:
-  * Pieces: Straight, Curve, Slope, Splitter, Lift, Collector, Cannon, Goal, Ramp, Decor.
-  * Each part has icon, hover tooltip, cost in Coins.
+  * Modules: Straight Path, Splitter, Lift, Collector, Cannon, Goal.
+  * Connectors: Curve, Slope, Ramp, Spiral.
+  * Each part has icon, hover tooltip, cost in Coins, and clear Module/Connector type indicator.
   * Art passes proxy QA checklist.
 * **Dependencies**: 1,2
 * **KPI Driver**: Early Puzzle Completion Rate.
@@ -68,6 +70,7 @@ Purpose – negotiated "what we're shipping".
 * **Acceptance Criteria**:
   * Level select UI with star ratings.
   * Contract defines available pieces and static non-moveable pre-placed pieces the player has to solve the puzzle with.
+  * All puzzle contracts respect Module-Connector alternation rule.
   * Pass/fail screen with Coins awarded.
 * **Dependencies**: 1–4,11
 * **KPI Driver**: Daily Active Puzzles Played.
