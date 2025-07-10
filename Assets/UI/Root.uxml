@@ -1,0 +1,90 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" editor-extension-mode="False">
+    <!-- Root UI Document for MarbleMaker Game -->
+    <!-- From UI docs: "owns one UIDocument with a single UXML root (Root.uxml)" -->
+    <!-- "Each major HUD region sits under its own <VisualElement class='region'>" -->
+    
+    <ui:VisualElement name="root" class="marble-maker-theme">
+        
+        <!-- Top Controls Region -->
+        <!-- From UI docs: "TopControls (▶ ⏸ ⟲ ⭮)" -->
+        <ui:VisualElement name="top-controls" class="region top-controls-region">
+            <ui:VisualElement class="controls-left">
+                <ui:Button name="play-button" text="▶" class="control-button play-button" />
+                <ui:Button name="pause-button" text="⏸" class="control-button pause-button" />
+                <ui:Button name="reset-button" text="⭮" class="control-button reset-button" />
+                <ui:Button name="undo-button" text="⟲" class="control-button undo-button" />
+            </ui:VisualElement>
+            
+            <ui:VisualElement class="controls-center">
+                <ui:Label name="simulation-status" text="Ready" class="status-label" />
+                <ui:Label name="tick-counter" text="Tick: 0" class="tick-label" />
+            </ui:VisualElement>
+            
+            <ui:VisualElement class="controls-right">
+                <ui:VisualElement class="currency-display">
+                    <ui:Label name="coin-label" text="100" class="coin-label" />
+                    <ui:Label text="Coins" class="currency-title" />
+                </ui:VisualElement>
+                <ui:VisualElement class="currency-display">
+                    <ui:Label name="part-token-label" text="0" class="part-token-label" />
+                    <ui:Label text="Tokens" class="currency-title" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+        
+        <!-- Main Content Area -->
+        <ui:VisualElement class="main-content">
+            
+            <!-- Parts Tray Region -->
+            <!-- From UI docs: "PartsTray ListView with makeItem/bindItem" -->
+            <ui:VisualElement name="parts-tray" class="region parts-tray-region">
+                <ui:Label text="Parts" class="region-title" />
+                <ui:ListView name="parts-list" class="parts-list" />
+                <ui:Label name="parts-count" text="4/100" class="parts-count" />
+            </ui:VisualElement>
+            
+            <!-- Game View Area (3D world) -->
+            <ui:VisualElement name="game-view" class="game-view-region">
+                <!-- This is where the 3D camera view would be rendered -->
+                <!-- UI overlays on top of 3D world -->
+            </ui:VisualElement>
+            
+            <!-- Inspector Region -->
+            <!-- From UI docs: "Inspector Label Level, Button Upgrade → SelectedModuleState" -->
+            <ui:VisualElement name="inspector" class="region inspector-region">
+                <ui:Label text="Inspector" class="region-title" />
+                
+                <ui:VisualElement class="selection-info">
+                    <ui:Label name="selected-part-label" text="No Selection" class="selected-part-name" />
+                    <ui:Label name="upgrade-level-label" text="" class="upgrade-level" />
+                    <ui:Label name="position-label" text="" class="position-info" />
+                </ui:VisualElement>
+                
+                <ui:VisualElement class="upgrade-controls">
+                    <ui:Button name="upgrade-button" text="Upgrade" class="upgrade-button" />
+                    <ui:Label name="upgrade-cost-label" text="" class="upgrade-cost" />
+                </ui:VisualElement>
+                
+                <ui:VisualElement class="interaction-controls">
+                    <ui:Label name="interaction-hint-label" text="" class="interaction-hint" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            
+        </ui:VisualElement>
+        
+        <!-- Modal Region -->
+        <!-- From UI docs: "Modal.uxml" -->
+        <ui:VisualElement name="modal" class="region modal-region">
+            
+            <!-- Tooltip -->
+            <!-- From UI docs: "Tooltip VisualElement class='tooltip' .visible = hover" -->
+            <ui:VisualElement name="tooltip" class="tooltip">
+                <ui:Label name="tooltip-text" text="" class="tooltip-text" />
+            </ui:VisualElement>
+            
+            <!-- Future modal dialogs would go here -->
+            
+        </ui:VisualElement>
+        
+    </ui:VisualElement>
+</ui:UXML>

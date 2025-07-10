@@ -80,6 +80,11 @@ namespace MarbleMaker.Core
         public static FixedPoint Clamp(FixedPoint value, FixedPoint min, FixedPoint max) => 
             new FixedPoint(Math.Max(min.value, Math.Min(max.value, value.value)));
         
+        // Trigonometric functions for deterministic physics
+        public static FixedPoint Sin(FixedPoint radians) => FromFloat((float)Math.Sin(radians.ToFloat()));
+        public static FixedPoint Cos(FixedPoint radians) => FromFloat((float)Math.Cos(radians.ToFloat()));
+        public static FixedPoint Tan(FixedPoint radians) => FromFloat((float)Math.Tan(radians.ToFloat()));
+        
         // Interface implementations
         public bool Equals(FixedPoint other) => value == other.value;
         public override bool Equals(object obj) => obj is FixedPoint other && Equals(other);
