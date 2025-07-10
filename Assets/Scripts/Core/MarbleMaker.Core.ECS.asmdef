@@ -1,0 +1,23 @@
+{
+    "name": "MarbleMaker.Core.ECS",
+    "rootNamespace": "MarbleMaker.Core.ECS",
+    "references": [
+        "GUID:734d92eba21c94caba915361bd5ac177",
+        "GUID:d8b63aba1907145bea998dd612889d6b",
+        "GUID:e0cd26848372d4e5c891c569017e11f1",
+        "GUID:8819f35a0fc84499b990e90a4ca1911f",
+        "GUID:2665a8d13d1b3f18800f46e256720795",
+        "GUID:b0214a6008ed146ff8f122a6a9c2f6cc",
+        "GUID:a5baed0c9693541a5bd947d336ec7659",
+        "GUID:f06555f75b070af458a003d92f9efb00"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
