@@ -108,6 +108,9 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = generatePairsJob.Schedule(state.Dependency);
 
+            // Step 3.5: Complete the generate job before capturing the array
+            state.Dependency.Complete();
+
             // Step 4: Process collision pairs in parallel
             var processCollisionPairsJob = new ProcessCollisionPairsJob
             {
