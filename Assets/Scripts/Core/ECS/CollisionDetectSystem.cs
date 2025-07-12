@@ -108,19 +108,16 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = generatePairsJob.Schedule(state.Dependency);
 
-            // Step 3.5: Complete the generate job before capturing the array
-            state.Dependency.Complete();
-
-            // Step 4: Process collision pairs in parallel
-            var processCollisionPairsJob = new ProcessCollisionPairsJob
-            {
-                collisionPairs = collisionPairs.AsArray(),
-                allMarbles = allMarbles.AsArray(),
+            // ensure the list is fully built before we take a pointer
+            state.Dependency.Complete();                     //  <<< hard sync
+            var processCollisionPairsJob = new ProcessCollisionPairsJob {
+                collisionPairs  = collisionPairs.AsArray(),
+                allMarbles      = allMarbles.AsArray(),      // now safe
                 marblesToDestroy = marblesToDestroy.AsParallelWriter(),
-                debrisToSpawn = debrisToSpawn.AsParallelWriter()
+                debrisToSpawn    = debrisToSpawn.AsParallelWriter()
             };
-            // Use batch size of 32 for good parallel performance
-            state.Dependency = processCollisionPairsJob.ScheduleParallel(collisionPairs.Length, 32, state.Dependency);
+            state.Dependency = processCollisionPairsJob.ScheduleParallel(
+                               collisionPairs.Length, 32, state.Dependency);
 
             // Apply collision results
             state.Dependency.Complete();
@@ -220,8 +217,8 @@ namespace MarbleMaker.Core.ECS
 
         public void Execute()
         {
-            // Ensure capacity for this frame
             processedKeys.EnsureCapacity(uniqueKeys.Length);
+            processedKeys.Clear();
             
             for (int i = 0; i < uniqueKeys.Length; i++)
             {

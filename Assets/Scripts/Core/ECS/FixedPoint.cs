@@ -61,15 +61,12 @@ namespace MarbleMaker.Core.ECS
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long Div(long a, long b)
         {
-#if UNITY_2024_1_OR_NEWER
-            // Use 128-bit arithmetic when available
+            if (b == 0) return 0;            // avoid /0 in release
+
+#if UNITY_2024_1_OR_NEWER           // Int128 path
+            // (a << 32) / b  — do the shift first!
             return (long)(((Int128)a << FRACTIONAL_BITS) / b);
-#else
-            // Fallback: prevent overflow in the shift by using ulong arithmetic
-            if (b == 0) return 0; // Avoid division by zero
-            
-            // For Q32.32 division, we need to shift the dividend left by 32 bits
-            // To prevent overflow, we cast to ulong before shifting
+#else                               // fallback for older Unity
             return (long)(((ulong)a << FRACTIONAL_BITS) / (ulong)b);
 #endif
         }

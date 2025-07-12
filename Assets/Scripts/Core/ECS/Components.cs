@@ -1,5 +1,6 @@
 using Unity.Entities;
 using Unity.Mathematics;
+using Unity.Burst;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -272,6 +273,7 @@ namespace MarbleMaker.Core.ECS
         /// Packs a 3D cell position into a 63-bit key for collision detection
         /// From collision docs: "21 bits per axis -> 63-bit key, supports ±1,048,575-world cells"
         /// </summary>
+        [BurstCompile]
         public static ulong PackCellKey(int3 cellPos)
         {
             const ulong MASK = 0x1FFFFFUL;  // 21 bits
@@ -283,6 +285,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Unpacks a 63-bit key back to 3D cell position
         /// </summary>
+        [BurstCompile]
         public static int3 UnpackCellKey(ulong packedKey)
         {
             const ulong MASK = 0x1FFFFFUL;
@@ -301,6 +304,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Converts fixed-point position to cell index
         /// </summary>
+        [BurstCompile]
         public static int3 PositionToCellIndex(TranslationFP position)
         {
             // Convert from Q32.32 fixed-point to grid cell using pure integer math
@@ -315,6 +319,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Converts cell index to fixed-point center position
         /// </summary>
+        [BurstCompile]
         public static TranslationFP CellIndexToPosition(int3 cellIndex)
         {
             // Convert grid cell to world position (center of cell)

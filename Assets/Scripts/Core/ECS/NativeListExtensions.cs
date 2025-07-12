@@ -13,9 +13,10 @@ namespace MarbleMaker.Core.ECS
         /// This is more efficient than Clear() as it doesn't deallocate memory
         /// </summary>
         [BurstCompile]
-        public static void FastClear<T>(this NativeList<T> list) where T : unmanaged
+        public static void FastClear<T>(this NativeList<T> list)
+            where T : unmanaged
         {
-            list.Length = 0;  // keeps capacity, avoids reallocation
+            list.Length = 0;          // keeps capacity
         }
     }
 } 
