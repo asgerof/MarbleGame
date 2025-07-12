@@ -63,7 +63,7 @@ namespace MarbleMaker.Core.ECS
         {
 #if UNITY_2024_1_OR_NEWER
             // Use 128-bit arithmetic when available
-            return (long)((Int128)a << FRACTIONAL_BITS / b);
+            return (long)(((Int128)a << FRACTIONAL_BITS) / b);
 #else
             // Fallback: prevent overflow in the shift by using ulong arithmetic
             if (b == 0) return 0; // Avoid division by zero
