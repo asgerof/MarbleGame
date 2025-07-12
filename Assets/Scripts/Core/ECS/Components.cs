@@ -121,12 +121,15 @@ namespace MarbleMaker.Core.ECS
 
     /// <summary>
     /// Collector module state
+    /// From collector docs: "CollectorState with circular buffer indices"
     /// </summary>
     public struct CollectorState
     {
-        public int queuedMarbles;   // number of marbles in queue
-        public int upgradeLevel;    // 0=basic, 1=FIFO, 2=burst control
-        public int burstSize;       // for level 2 upgrade
+        public byte level;              // 0 = Basic, 1 = FIFO, 2 = Burst-4 ...
+        public uint head;               // circular buffer index
+        public uint tail;
+        public uint count;              // number of marbles in queue
+        public uint burstSize;          // for level 2+ upgrade (configurable burst size)
     }
 
     /// <summary>
@@ -176,18 +179,51 @@ namespace MarbleMaker.Core.ECS
 
     /// <summary>
     /// Marble handle for collision detection
-    /// Used in NativeMultiHashMap<CellIndex, MarbleHandle>
+    /// Used in NativeMultiHashMap<ulong, MarbleHandle> - entity index as uint for no pointer chasing
     /// </summary>
     public struct MarbleHandle
     {
-        public Entity entity;
-        public int marbleId;
+        public uint entityIndex;        // Entity index for fast lookup
+        public long absoluteTick;       // Tick when marble was created for deterministic ordering
         
-        public MarbleHandle(Entity e, int id)
+        public MarbleHandle(uint index, long tick)
         {
-            entity = e;
-            marbleId = id;
+            entityIndex = index;
+            absoluteTick = tick;
         }
+    }
+
+    /// <summary>
+    /// Seed spawner component for initial marble spawning
+    /// From marble lifecycle docs: "Editor instantiates Seed Spawner entities for every start pad defined in board JSON"
+    /// </summary>
+    public struct SeedSpawner : IComponentData
+    {
+        public int3 spawnPosition;      // Grid position to spawn marbles
+        public int maxMarbles;          // Maximum marbles this spawner can create (-1 = unlimited)
+        public int spawnedCount;        // Number of marbles spawned so far
+        public bool isActive;           // Whether spawner is currently active
+    }
+
+    /// <summary>
+    /// Collector queue element for marble queuing
+    /// From collector docs: "DynamicBuffer<CollectorQueueElem> + CollectorState indices"
+    /// </summary>
+    [InternalBufferCapacity(8)]
+    public struct CollectorQueueElem : IBufferElementData
+    {
+        public Entity marble;
+        public long enqueueTick;        // Tick when marble was enqueued for deterministic order
+    }
+
+    /// <summary>
+    /// Goal pad component for marble destruction and scoring
+    /// </summary>
+    public struct GoalPad : IComponentData
+    {
+        public int3 goalPosition;       // Grid position of goal
+        public int coinReward;          // Coins awarded per marble
+        public int marblesCollected;    // Total marbles collected by this goal
     }
 
     /// <summary>
@@ -209,5 +245,65 @@ namespace MarbleMaker.Core.ECS
         public int partId;
         public int upgradeLevel;
         public int rotation;
+    }
+
+    /// <summary>
+    /// Utility functions for cell hash and marble operations
+    /// </summary>
+    public static class ECSUtils
+    {
+        /// <summary>
+        /// Packs a 3D cell position into a 63-bit key for collision detection
+        /// From collision docs: "21 bits per axis -> 63-bit key, supports ±1,048,575-world cells"
+        /// </summary>
+        public static ulong PackCellKey(int3 cellPos)
+        {
+            const ulong MASK = 0x1FFFFFUL;  // 21 bits
+            return ((ulong)((uint)cellPos.x & MASK) << 42) |
+                   ((ulong)((uint)cellPos.y & MASK) << 21) |
+                   ((ulong)((uint)cellPos.z & MASK));
+        }
+
+        /// <summary>
+        /// Unpacks a 63-bit key back to 3D cell position
+        /// </summary>
+        public static int3 UnpackCellKey(ulong packedKey)
+        {
+            const ulong MASK = 0x1FFFFFUL;
+            int x = (int)((packedKey >> 42) & MASK);
+            int y = (int)((packedKey >> 21) & MASK);
+            int z = (int)(packedKey & MASK);
+            
+            // Handle negative values (sign extension)
+            if (x >= 0x100000) x -= 0x200000;
+            if (y >= 0x100000) y -= 0x200000;
+            if (z >= 0x100000) z -= 0x200000;
+            
+            return new int3(x, y, z);
+        }
+
+        /// <summary>
+        /// Converts fixed-point position to cell index
+        /// </summary>
+        public static int3 PositionToCellIndex(TranslationFP position)
+        {
+            // Convert from Q32.32 fixed-point to grid cell
+            float worldPos = position.ToFloat();
+            return new int3(
+                (int)math.floor(worldPos),
+                (int)math.floor(worldPos), 
+                (int)math.floor(worldPos)
+            );
+        }
+
+        /// <summary>
+        /// Converts cell index to fixed-point center position
+        /// </summary>
+        public static TranslationFP CellIndexToPosition(int3 cellIndex)
+        {
+            // Convert grid cell to world position (center of cell)
+            float worldPos = cellIndex.x + 0.5f;
+            return TranslationFP.FromFloat(worldPos);
+        }
     }
 }

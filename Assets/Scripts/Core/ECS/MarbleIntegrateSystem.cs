@@ -37,111 +37,137 @@ namespace MarbleMaker.Core.ECS
             {
                 deltaTime = TICK_DURATION_FP,
                 terminalSpeed = TERMINAL_SPEED_FP,
+                gravityAccel = GRAVITY_ACCEL_FP,
+                frictionAccel = FRICTION_ACCEL_FP,
                 cellSize = CELL_SIZE_FP
             };
 
             // Schedule parallel job as specified in ECS docs
             state.Dependency = marbleIntegrateJob.ScheduleParallel(state.Dependency);
         }
+    }
+
+    /// <summary>
+    /// Job to integrate marble physics with fixed-point arithmetic
+    /// From TDD: "v += a * Δ; clamp; p += v * Δ • Writes new CellIndex when crossing grid border"
+    /// </summary>
+    [BurstCompile]
+    public struct MarbleIntegrateJob : IJobEntity
+    {
+        [ReadOnly] public long deltaTime;
+        [ReadOnly] public long terminalSpeed;
+        [ReadOnly] public long gravityAccel;
+        [ReadOnly] public long frictionAccel;
+        [ReadOnly] public long cellSize;
+
+        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, ref AccelerationFP acceleration, ref CellIndex cellIndex)
+        {
+            // Step 1: Calculate acceleration based on ramp angle and friction
+            // For now, apply base gravity and friction (module-specific acceleration will be added via ModuleRef)
+            long totalAccel = gravityAccel + frictionAccel;
+            acceleration.value = totalAccel;
+
+            // Step 2: Integrate velocity: v += a * Δt
+            velocity.value += acceleration.value * deltaTime / 4294967296L; // Divide by 2^32 for fixed-point multiplication
+
+            // Step 3: Clamp velocity to terminal speed
+            if (velocity.value > terminalSpeed)
+                velocity.value = terminalSpeed;
+            else if (velocity.value < -terminalSpeed)
+                velocity.value = -terminalSpeed;
+
+            // Step 4: Integrate position: p += v * Δt
+            long oldPosition = translation.value;
+            translation.value += velocity.value * deltaTime / 4294967296L;
+
+            // Step 5: Update CellIndex when crossing grid border
+            var newCellIndex = CalculateCellIndex(translation.value);
+            if (!newCellIndex.xyz.Equals(cellIndex.xyz))
+            {
+                cellIndex.xyz = newCellIndex.xyz;
+            }
+        }
 
         /// <summary>
-        /// Parallel job for marble physics integration
-        /// Implements: v += a * Δ; clamp; p += v * Δ
+        /// Calculates cell index from fixed-point position
         /// </summary>
         [BurstCompile]
-        private partial struct MarbleIntegrateJob : IJobEntity
+        private CellIndex CalculateCellIndex(long positionFP)
         {
-            [ReadOnly] public long deltaTime;
-            [ReadOnly] public long terminalSpeed;
-            [ReadOnly] public long cellSize;
-
-            [BurstCompile]
-            public void Execute(
-                ref TranslationFP translation,
-                ref VelocityFP velocity,
-                ref AccelerationFP acceleration,
-                ref CellIndex cellIndex,
-                in MarbleTag marbleTag)
-            {
-                // Physics integration: v += a * Δt
-                long newVelocity = velocity.value + FixedPointMul(acceleration.value, deltaTime);
-                
-                // Clamp to terminal speed as specified in GDD
-                if (newVelocity > terminalSpeed)
-                {
-                    newVelocity = terminalSpeed;
-                }
-                else if (newVelocity < -terminalSpeed)
-                {
-                    newVelocity = -terminalSpeed;
-                }
-                
-                velocity.value = newVelocity;
-                
-                // Position integration: p += v * Δt
-                long oldPosition = translation.value;
-                long newPosition = oldPosition + FixedPointMul(velocity.value, deltaTime);
-                translation.value = newPosition;
-                
-                // Update cell index when crossing grid border
-                UpdateCellIndex(ref cellIndex, oldPosition, newPosition);
-            }
-
-            [BurstCompile]
-            private void UpdateCellIndex(ref CellIndex cellIndex, long oldPosition, long newPosition)
-            {
-                // Calculate old and new cell coordinates
-                int oldCellX = (int)(oldPosition / cellSize);
-                int newCellX = (int)(newPosition / cellSize);
-                
-                // Update cell index if marble crossed cell boundary
-                if (oldCellX != newCellX)
-                {
-                    cellIndex.xyz.x = newCellX;
-                }
-                
-                // Note: This is a simplified 1D version. In the full implementation,
-                // you would handle x, y, z coordinates separately based on the track direction
-            }
-
-            /// <summary>
-            /// Fixed-point multiplication: (a * b) >> 32
-            /// </summary>
-            [BurstCompile]
-            private long FixedPointMul(long a, long b)
-            {
-                return (a * b) >> 32;
-            }
+            // Convert Q32.32 fixed-point to integer grid position
+            // Position represents world coordinate, cell index is floor(position)
+            float worldPos = (float)positionFP / 4294967296f;
+            int cellX = (int)math.floor(worldPos);
+            int cellY = (int)math.floor(worldPos); // TODO: Separate Y coordinate when 3D movement is implemented
+            int cellZ = (int)math.floor(worldPos); // TODO: Separate Z coordinate when 3D movement is implemented
+            
+            return new CellIndex(cellX, cellY, cellZ);
         }
     }
 
     /// <summary>
-    /// Physics calculation job for marble acceleration
-    /// Implements the exact physics formulas from PhysicsIntegrator
+    /// Advanced marble integrate job with module-specific physics
+    /// This version considers ConnectorRef and ModuleRef for varying acceleration
     /// </summary>
     [BurstCompile]
-    public partial struct MarblePhysicsJob : IJobEntity
+    public struct AdvancedMarbleIntegrateJob : IJobEntity
     {
-        [ReadOnly] public long gravityAccel;
-        [ReadOnly] public long frictionAccel;
-        [ReadOnly] public NativeArray<ConnectorRef> connectorRefs;
+        [ReadOnly] public long deltaTime;
+        [ReadOnly] public long terminalSpeed;
+        [ReadOnly] public long baseGravityAccel;
+        [ReadOnly] public long baseFrictionAccel;
+        [ReadOnly] public ComponentLookup<ModuleRef> moduleRefLookup;
+        [ReadOnly] public ComponentLookup<ConnectorRef> connectorRefLookup;
 
-        [BurstCompile]
-        public void Execute(
-            ref AccelerationFP acceleration,
-            in CellIndex cellIndex,
-            in MarbleTag marbleTag)
+        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, ref AccelerationFP acceleration, ref CellIndex cellIndex)
         {
-            // Calculate acceleration based on current cell properties
-            // This would lookup the connector/module at the current cell
-            // and apply the appropriate physics forces
+            // Step 1: Calculate acceleration based on current cell's module/connector
+            long totalAccel = CalculateAcceleration(cellIndex.xyz);
+            acceleration.value = totalAccel;
+
+            // Step 2: Integrate velocity: v += a * Δt
+            velocity.value += acceleration.value * deltaTime / 4294967296L;
+
+            // Step 3: Clamp velocity to terminal speed
+            if (velocity.value > terminalSpeed)
+                velocity.value = terminalSpeed;
+            else if (velocity.value < -terminalSpeed)
+                velocity.value = -terminalSpeed;
+
+            // Step 4: Integrate position: p += v * Δt
+            translation.value += velocity.value * deltaTime / 4294967296L;
+
+            // Step 5: Update CellIndex when crossing grid border
+            var newCellIndex = CalculateCellIndex(translation.value);
+            if (!newCellIndex.xyz.Equals(cellIndex.xyz))
+            {
+                cellIndex.xyz = newCellIndex.xyz;
+            }
+        }
+
+        /// <summary>
+        /// Calculates acceleration based on the module/connector in the current cell
+        /// </summary>
+        [BurstCompile]
+        private long CalculateAcceleration(int3 cellPos)
+        {
+            // TODO: Look up module/connector at cellPos and apply its physics constants
+            // For now, return base physics values
+            return baseGravityAccel + baseFrictionAccel;
+        }
+
+        /// <summary>
+        /// Calculates cell index from fixed-point position
+        /// </summary>
+        [BurstCompile]
+        private CellIndex CalculateCellIndex(long positionFP)
+        {
+            float worldPos = (float)positionFP / 4294967296f;
+            int cellX = (int)math.floor(worldPos);
+            int cellY = (int)math.floor(worldPos);
+            int cellZ = (int)math.floor(worldPos);
             
-            // Default to gravity only for now
-            acceleration.value = gravityAccel;
-            
-            // TODO: Implement full physics lookup based on cell contents
-            // This would query the module/connector at cellIndex.xyz
-            // and apply the appropriate forces (gravity, friction, etc.)
+            return new CellIndex(cellX, cellY, cellZ);
         }
     }
 }

@@ -209,18 +209,36 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void AddSystemsToGroups()
         {
-            // InputActionGroup systems
+            // InputActionGroup systems (applies queued click/tap events)
             playSimWorld.CreateSystem<InteractApplySystem>();
+            playSimWorld.CreateSystem<SeedSpawnerSystem>();
             
-            // MotionGroup systems
+            // MotionGroup systems (pure data jobs - marble integration, collision)
             playSimWorld.CreateSystem<MarbleIntegrateSystem>();
             playSimWorld.CreateSystem<CollisionDetectSystem>();
             playSimWorld.CreateSystem<DebrisCompactionSystem>();
             
-            // ModuleLogicGroup systems
-            playSimWorld.CreateSystem<SplitterLogicSystem>();
-            playSimWorld.CreateSystem<CollectorDequeueSystem>();
+            // ModuleLogicGroup systems (state machines for splitters, collectors, cannons, lifts)
+            // Goal systems (run first)
+            playSimWorld.CreateSystem<GoalPadInitializationSystem>();
+            playSimWorld.CreateSystem<GoalDetectionSystem>();
+            playSimWorld.CreateSystem<GoalPadSystem>();
+            
+            // Lift systems
+            playSimWorld.CreateSystem<LiftInitializationSystem>();
+            playSimWorld.CreateSystem<LiftLoadingSystem>();
             playSimWorld.CreateSystem<LiftStepSystem>();
+            
+            // Splitter systems
+            playSimWorld.CreateSystem<SplitterInputDetectionSystem>();
+            playSimWorld.CreateSystem<SplitterLogicSystem>();
+            
+            // Collector systems
+            playSimWorld.CreateSystem<CollectorEnqueueSystem>();
+            playSimWorld.CreateSystem<CollectorDequeueSystem>();
+            
+            // Runtime spawning system (runs last)
+            playSimWorld.CreateSystem<RuntimeMarbleSpawnerSystem>();
         }
         
         /// <summary>

@@ -7,19 +7,20 @@ using Unity.Mathematics;
 namespace MarbleMaker.Core.ECS
 {
     /// <summary>
-    /// Detects collisions between marbles and creates debris
-    /// From ECS docs: "CollisionDetectSystem (ScheduleParallel) • NativeMultiHashMap<CellIndex, MarbleHandle> • If >1 marble OR cell has DebrisTag ➜ destroy marbles, add BlockDebris entity"
-    /// From GDD: "When two marbles try to occupy the same cell on any tick, both destruct"
+    /// Collision detection system using cell hash for marble-to-marble and marble-to-debris collisions
+    /// From ECS docs: "CollisionDetectSystem handles marble-to-marble and marble-to-debris collisions"
+    /// From collision docs: "Uses cellHash lookup; if destination occupied by marble or debris → spawn debris & mark marbles 'dead'"
     /// </summary>
     [UpdateInGroup(typeof(MotionGroup))]
     [UpdateAfter(typeof(MarbleIntegrateSystem))]
     [BurstCompile]
     public partial struct CollisionDetectSystem : ISystem
     {
-        private NativeMultiHashMap<int3, MarbleHandle> cellMarbleMap;
-        private NativeHashSet<int3> debrisCells;
-        private NativeList<Entity> marblestoDestroy;
-        private NativeList<int3> newDebrisPositions;
+        // Cell hash for collision detection
+        private NativeMultiHashMap<ulong, MarbleHandle> cellHash;
+        private NativeHashSet<ulong> debrisCells;
+        private NativeList<Entity> marblesToDestroy;
+        private NativeList<int3> debrisToSpawn;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -27,188 +28,195 @@ namespace MarbleMaker.Core.ECS
             // System requires marble entities to process
             state.RequireForUpdate<MarbleTag>();
             
-            // Initialize collections
-            cellMarbleMap = new NativeMultiHashMap<int3, MarbleHandle>(10000, Allocator.Persistent);
-            debrisCells = new NativeHashSet<int3>(1000, Allocator.Persistent);
-            marblestoDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
-            newDebrisPositions = new NativeList<int3>(1000, Allocator.Persistent);
+            // Initialize collections with capacity = max marbles × 1.2
+            int maxMarbles = GameConstants.MAX_MARBLES_PC; // TODO: Platform-specific
+            int capacity = (int)(maxMarbles * 1.2f);
+            
+            cellHash = new NativeMultiHashMap<ulong, MarbleHandle>(capacity, Allocator.Persistent);
+            debrisCells = new NativeHashSet<ulong>(capacity / 4, Allocator.Persistent);
+            marblesToDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
+            debrisToSpawn = new NativeList<int3>(1000, Allocator.Persistent);
         }
 
         [BurstCompile]
         public void OnDestroy(ref SystemState state)
         {
             // Clean up native collections
-            if (cellMarbleMap.IsCreated) cellMarbleMap.Dispose();
+            if (cellHash.IsCreated) cellHash.Dispose();
             if (debrisCells.IsCreated) debrisCells.Dispose();
-            if (marblestoDestroy.IsCreated) marblestoDestroy.Dispose();
-            if (newDebrisPositions.IsCreated) newDebrisPositions.Dispose();
+            if (marblesToDestroy.IsCreated) marblesToDestroy.Dispose();
+            if (debrisToSpawn.IsCreated) debrisToSpawn.Dispose();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             // Clear previous frame data
-            cellMarbleMap.Clear();
+            cellHash.Clear();
             debrisCells.Clear();
-            marblestoDestroy.Clear();
-            newDebrisPositions.Clear();
+            marblesToDestroy.Clear();
+            debrisToSpawn.Clear();
 
-            // Build debris cell set
-            var buildDebrisJob = new BuildDebrisCellsJob
+            // Get current tick for deterministic ordering
+            var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
+
+            // Step 1: Populate debris cells hash
+            var populateDebrisJob = new PopulateDebrisHashJob
             {
                 debrisCells = debrisCells.AsParallelWriter()
             };
-            state.Dependency = buildDebrisJob.ScheduleParallel(state.Dependency);
+            state.Dependency = populateDebrisJob.ScheduleParallel(state.Dependency);
 
-            // Build marble position map
-            var buildMarbleMapJob = new BuildMarbleMapJob
+            // Step 2: Populate marble cell hash
+            var populateMarbleHashJob = new PopulateMarbleHashJob
             {
-                cellMarbleMap = cellMarbleMap.AsParallelWriter()
+                cellHash = cellHash.AsParallelWriter(),
+                currentTick = currentTick
             };
-            state.Dependency = buildMarbleMapJob.ScheduleParallel(state.Dependency);
+            state.Dependency = populateMarbleHashJob.ScheduleParallel(state.Dependency);
 
-            // Wait for jobs to complete before collision detection
-            state.Dependency.Complete();
-
-            // Detect collisions
+            // Step 3: Detect collisions
             var detectCollisionsJob = new DetectCollisionsJob
             {
-                cellMarbleMap = cellMarbleMap,
+                cellHash = cellHash,
                 debrisCells = debrisCells,
-                marblesToDestroy = marblestoDestroy,
-                newDebrisPositions = newDebrisPositions
+                marblesToDestroy = marblesToDestroy,
+                debrisToSpawn = debrisToSpawn
             };
             state.Dependency = detectCollisionsJob.Schedule(state.Dependency);
+
+            // Step 4: Apply collision results
             state.Dependency.Complete();
-
-            // Apply collision results
-            if (marblestoDestroy.Length > 0 || newDebrisPositions.Length > 0)
-            {
-                var ecbSingleton = SystemAPI.GetSingleton<BeginFixedStepSimulationEntityCommandBufferSystem.Singleton>();
-                var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
-
-                ApplyCollisionResults(ecb);
-            }
+            ApplyCollisionResults(ref state);
         }
 
-        [BurstCompile]
-        private void ApplyCollisionResults(EntityCommandBuffer ecb)
+        /// <summary>
+        /// Applies collision results by destroying marbles and spawning debris
+        /// </summary>
+        private void ApplyCollisionResults(ref SystemState state)
         {
+            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
+                .CreateCommandBuffer(state.WorldUnmanaged);
+
             // Destroy collided marbles
-            for (int i = 0; i < marblestoDestroy.Length; i++)
+            for (int i = 0; i < marblesToDestroy.Length; i++)
             {
-                ecb.DestroyEntity(marblestoDestroy[i]);
+                ecb.DestroyEntity(marblesToDestroy[i]);
             }
 
-            // Create debris entities
-            for (int i = 0; i < newDebrisPositions.Length; i++)
+            // Spawn debris entities
+            for (int i = 0; i < debrisToSpawn.Length; i++)
             {
                 var debrisEntity = ecb.CreateEntity();
-                ecb.AddComponent(debrisEntity, new CellIndex(newDebrisPositions[i]));
-                ecb.AddComponent(debrisEntity, new DebrisTag());
+                ecb.AddComponent<DebrisTag>(debrisEntity);
+                ecb.AddComponent<CellIndex>(debrisEntity, new CellIndex(debrisToSpawn[i]));
             }
         }
+    }
 
-        /// <summary>
-        /// Job to build the debris cells hash set
-        /// </summary>
-        [BurstCompile]
-        private partial struct BuildDebrisCellsJob : IJobEntity
+    /// <summary>
+    /// Job to populate debris cells hash set
+    /// </summary>
+    [BurstCompile]
+    public struct PopulateDebrisHashJob : IJobEntity
+    {
+        public NativeHashSet<ulong>.ParallelWriter debrisCells;
+
+        public void Execute(in CellIndex cellIndex, in DebrisTag debrisTag)
         {
-            [WriteOnly] public NativeHashSet<int3>.ParallelWriter debrisCells;
-
-            [BurstCompile]
-            public void Execute(in CellIndex cellIndex, in DebrisTag debrisTag)
-            {
-                debrisCells.Add(cellIndex.xyz);
-            }
+            var packedKey = ECSUtils.PackCellKey(cellIndex.xyz);
+            debrisCells.TryAdd(packedKey);
         }
+    }
 
-        /// <summary>
-        /// Job to build the marble position map
-        /// NativeMultiHashMap<CellIndex, MarbleHandle> as specified in ECS docs
-        /// </summary>
-        [BurstCompile]
-        private partial struct BuildMarbleMapJob : IJobEntity
+    /// <summary>
+    /// Job to populate marble cell hash
+    /// From collision docs: "NativeMultiHashMap<ulong, MarbleHandle> cellHash"
+    /// </summary>
+    [BurstCompile]
+    public struct PopulateMarbleHashJob : IJobEntity
+    {
+        public NativeMultiHashMap<ulong, MarbleHandle>.ParallelWriter cellHash;
+        [ReadOnly] public long currentTick;
+
+        public void Execute(Entity entity, in CellIndex cellIndex, in MarbleTag marbleTag)
         {
-            [WriteOnly] public NativeMultiHashMap<int3, MarbleHandle>.ParallelWriter cellMarbleMap;
-
-            [BurstCompile]
-            public void Execute(Entity entity, in CellIndex cellIndex, in MarbleTag marbleTag)
-            {
-                var marbleHandle = new MarbleHandle(entity, entity.Index);
-                cellMarbleMap.Add(cellIndex.xyz, marbleHandle);
-            }
+            var packedKey = ECSUtils.PackCellKey(cellIndex.xyz);
+            var marbleHandle = new MarbleHandle((uint)entity.Index, currentTick);
+            cellHash.Add(packedKey, marbleHandle);
         }
+    }
 
-        /// <summary>
-        /// Job to detect collisions and mark entities for destruction
-        /// Implements: "If >1 marble OR cell has DebrisTag ➜ destroy marbles, add BlockDebris entity"
-        /// </summary>
-        [BurstCompile]
-        private struct DetectCollisionsJob : IJob
+    /// <summary>
+    /// Job to detect collisions using cell hash
+    /// From GDD: "When two marbles try to occupy the same cell on any tick, both destruct"
+    /// </summary>
+    [BurstCompile]
+    public struct DetectCollisionsJob : IJob
+    {
+        [ReadOnly] public NativeMultiHashMap<ulong, MarbleHandle> cellHash;
+        [ReadOnly] public NativeHashSet<ulong> debrisCells;
+        public NativeList<Entity> marblesToDestroy;
+        public NativeList<int3> debrisToSpawn;
+
+        public void Execute()
         {
-            [ReadOnly] public NativeMultiHashMap<int3, MarbleHandle> cellMarbleMap;
-            [ReadOnly] public NativeHashSet<int3> debrisCells;
-            [WriteOnly] public NativeList<Entity> marblesToDestroy;
-            [WriteOnly] public NativeList<int3> newDebrisPositions;
+            // Check each unique cell for collisions
+            var uniqueKeys = cellHash.GetKeyArray(Allocator.Temp);
+            var processedKeys = new NativeHashSet<ulong>(uniqueKeys.Length, Allocator.Temp);
 
-            [BurstCompile]
-            public void Execute()
+            for (int i = 0; i < uniqueKeys.Length; i++)
             {
-                // Get all unique cell positions
-                var allCells = cellMarbleMap.GetKeyArray(Allocator.Temp);
+                var key = uniqueKeys[i];
+                if (processedKeys.Contains(key))
+                    continue;
 
-                for (int i = 0; i < allCells.Length; i++)
+                processedKeys.Add(key);
+
+                // Check if cell has debris - marbles hitting debris are destroyed
+                if (debrisCells.Contains(key))
                 {
-                    var cellPos = allCells[i];
-                    var marblesInCell = new NativeList<MarbleHandle>(Allocator.Temp);
-
-                    // Collect all marbles in this cell
-                    if (cellMarbleMap.TryGetFirstValue(cellPos, out var marbleHandle, out var iterator))
+                    // Destroy all marbles in this cell
+                    var iterator = cellHash.GetValuesForKey(key);
+                    while (iterator.MoveNext())
                     {
-                        do
-                        {
-                            marblesInCell.Add(marbleHandle);
-                        }
-                        while (cellMarbleMap.TryGetNextValue(out marbleHandle, ref iterator));
+                        var marbleHandle = iterator.Current;
+                        var entity = new Entity { Index = (int)marbleHandle.entityIndex, Version = 1 };
+                        marblesToDestroy.Add(entity);
                     }
-
-                    // Check collision conditions
-                    bool hasCollision = false;
-
-                    // Condition 1: More than 1 marble in cell
-                    if (marblesInCell.Length > 1)
-                    {
-                        hasCollision = true;
-                    }
-                    // Condition 2: Cell has debris and marbles
-                    else if (marblesInCell.Length > 0 && debrisCells.Contains(cellPos))
-                    {
-                        hasCollision = true;
-                    }
-
-                    // Apply collision results
-                    if (hasCollision)
-                    {
-                        // Destroy all marbles in this cell
-                        for (int j = 0; j < marblesInCell.Length; j++)
-                        {
-                            marblesToDestroy.Add(marblesInCell[j].entity);
-                        }
-
-                        // Create debris if this cell doesn't already have debris
-                        if (!debrisCells.Contains(cellPos))
-                        {
-                            newDebrisPositions.Add(cellPos);
-                        }
-                    }
-
-                    marblesInCell.Dispose();
                 }
+                else
+                {
+                    // Check for marble-to-marble collisions
+                    var marbleHandles = new NativeList<MarbleHandle>(8, Allocator.Temp);
+                    var iterator = cellHash.GetValuesForKey(key);
+                    while (iterator.MoveNext())
+                    {
+                        marbleHandles.Add(iterator.Current);
+                    }
 
-                allCells.Dispose();
+                    // If 2 or more marbles in same cell, collision occurred
+                    if (marbleHandles.Length >= 2)
+                    {
+                        // Destroy all marbles in collision
+                        for (int j = 0; j < marbleHandles.Length; j++)
+                        {
+                            var marbleHandle = marbleHandles[j];
+                            var entity = new Entity { Index = (int)marbleHandle.entityIndex, Version = 1 };
+                            marblesToDestroy.Add(entity);
+                        }
+
+                        // Spawn debris at collision location
+                        var cellPos = ECSUtils.UnpackCellKey(key);
+                        debrisToSpawn.Add(cellPos);
+                    }
+
+                    marbleHandles.Dispose();
+                }
             }
+
+            uniqueKeys.Dispose();
+            processedKeys.Dispose();
         }
     }
 }

@@ -7,183 +7,232 @@ using Unity.Mathematics;
 namespace MarbleMaker.Core.ECS
 {
     /// <summary>
-    /// Handles collector module marble dequeuing logic
-    /// From ECS docs: "CollectorDequeueSystem • Basic level: dequeue *all* queued ids this tick • Lv 2 FIFO: dequeue one id"
+    /// System for dequeuing marbles from collector modules
+    /// From collector docs: "CollectorDequeueSystem handles marble dequeuing from collector modules"
+    /// "Dequeue logic varies based on collector's upgrade level (basic, FIFO, burst control)"
     /// </summary>
     [UpdateInGroup(typeof(ModuleLogicGroup))]
-    [UpdateAfter(typeof(SplitterLogicSystem))]
     [BurstCompile]
     public partial struct CollectorDequeueSystem : ISystem
     {
-        private NativeList<Entity> marblesToRelease;
-        private NativeList<int3> releasePositions;
+        private EntityArchetype marbleArchetype;
+        private bool archetypeInitialized;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             // System requires collector entities to process
             state.RequireForUpdate<ModuleState<CollectorState>>();
-            
-            // Initialize collections for marble release
-            marblesToRelease = new NativeList<Entity>(1000, Allocator.Persistent);
-            releasePositions = new NativeList<int3>(1000, Allocator.Persistent);
-        }
-
-        [BurstCompile]
-        public void OnDestroy(ref SystemState state)
-        {
-            // Clean up native collections
-            if (marblesToRelease.IsCreated) marblesToRelease.Dispose();
-            if (releasePositions.IsCreated) releasePositions.Dispose();
+            archetypeInitialized = false;
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Clear previous frame data
-            marblesToRelease.Clear();
-            releasePositions.Clear();
-
-            // Process collectors and release marbles
-            var processCollectorsJob = new ProcessCollectorsJob
+            // Initialize marble archetype if not done yet
+            if (!archetypeInitialized)
             {
-                marblesToRelease = marblesToRelease,
-                releasePositions = releasePositions
-            };
-
-            state.Dependency = processCollectorsJob.ScheduleParallel(state.Dependency);
-            state.Dependency.Complete();
-
-            // Apply marble release results
-            if (marblesToRelease.Length > 0)
-            {
-                var ecbSingleton = SystemAPI.GetSingleton<BeginFixedStepSimulationEntityCommandBufferSystem.Singleton>();
-                var ecb = ecbSingleton.CreateCommandBuffer(state.WorldUnmanaged);
-
-                ApplyMarbleRelease(ecb);
+                InitializeMarbleArchetype(ref state);
+                archetypeInitialized = true;
             }
-        }
 
-        [BurstCompile]
-        private void ApplyMarbleRelease(EntityCommandBuffer ecb)
-        {
-            // Release marbles from collectors to their output positions
-            for (int i = 0; i < marblesToRelease.Length; i++)
+            // Get ECB for marble spawning
+            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
+                .CreateCommandBuffer(state.WorldUnmanaged);
+
+            // Process all collectors
+            foreach (var (collectorState, queueBuffer, entity) in 
+                SystemAPI.Query<RefRW<ModuleState<CollectorState>>, DynamicBuffer<CollectorQueueElem>>()
+                .WithEntityAccess())
             {
-                var marbleEntity = marblesToRelease[i];
-                var releasePos = releasePositions[i];
-
-                // Update marble position and reset to active movement
-                ecb.SetComponent(marbleEntity, new CellIndex(releasePos));
-                ecb.SetComponent(marbleEntity, VelocityFP.Zero); // Start with zero velocity
+                if (collectorState.ValueRO.state.count > 0)
+                {
+                    ProcessCollectorDequeue(ref collectorState.ValueRW.state, queueBuffer, ecb, marbleArchetype);
+                }
             }
         }
 
         /// <summary>
-        /// Job to process collector dequeue logic based on upgrade level
-        /// Implements different dequeue behaviors per upgrade level
+        /// Initializes the marble archetype for spawning
+        /// </summary>
+        private void InitializeMarbleArchetype(ref SystemState state)
+        {
+            var entityManager = state.EntityManager;
+            marbleArchetype = entityManager.CreateArchetype(
+                typeof(TranslationFP),
+                typeof(VelocityFP),
+                typeof(AccelerationFP),
+                typeof(CellIndex),
+                typeof(MarbleTag)
+            );
+        }
+
+        /// <summary>
+        /// Processes collector dequeue based on upgrade level
+        /// From collector docs: "switch (state.level) case 0: Basic - flush entire queue"
         /// </summary>
         [BurstCompile]
-        private partial struct ProcessCollectorsJob : IJobEntity
+        private void ProcessCollectorDequeue(ref CollectorState state, DynamicBuffer<CollectorQueueElem> queue, 
+            EntityCommandBuffer ecb, EntityArchetype marbleArchetype)
         {
-            [WriteOnly] public NativeList<Entity> marblesToRelease;
-            [WriteOnly] public NativeList<int3> releasePositions;
+            const uint MASK = 0xFFFFFFFF; // For circular buffer operations (will be set properly when buffer is power of 2)
 
-            [BurstCompile]
-            public void Execute(
-                Entity entity,
-                ref ModuleState<CollectorState> collectorState,
-                in CellIndex cellIndex,
-                in ModuleRef moduleRef)
+            switch (state.level)
             {
-                // Only process if there are queued marbles
-                if (collectorState.state.queuedMarbles <= 0)
-                    return;
-
-                int marblesToDequeue = 0;
-
-                // Determine how many marbles to dequeue based on upgrade level
-                switch (collectorState.state.upgradeLevel)
-                {
-                    case 0: // Basic level: dequeue ALL queued marbles this tick
-                        marblesToDequeue = collectorState.state.queuedMarbles;
-                        break;
-
-                    case 1: // Level 2 FIFO: dequeue one marble
-                        marblesToDequeue = math.min(1, collectorState.state.queuedMarbles);
-                        break;
-
-                    case 2: // Level 3 Burst control: dequeue burst size
-                        marblesToDequeue = math.min(collectorState.state.burstSize, collectorState.state.queuedMarbles);
-                        break;
-
-                    default:
-                        marblesToDequeue = 0;
-                        break;
-                }
-
-                // Calculate output position for released marbles
-                var outputPos = CalculateCollectorOutput(cellIndex.xyz, moduleRef);
-
-                // Release the determined number of marbles
-                for (int i = 0; i < marblesToDequeue; i++)
-                {
-                    // In a full implementation, this would get actual marble entities from the queue
-                    var marbleEntity = GetQueuedMarble(entity, i);
-                    
-                    if (marbleEntity != Entity.Null)
+                case 0: // Basic – flush entire queue
+                    for (uint i = 0; i < state.count; i++)
                     {
-                        marblesToRelease.Add(marbleEntity);
-                        releasePositions.Add(outputPos);
+                        var queueIndex = (int)((state.head + i) & MASK);
+                        if (queueIndex < queue.Length)
+                        {
+                            var queueElem = queue[queueIndex];
+                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                        }
                     }
-                }
+                    // Clear the queue
+                    queue.Clear();
+                    state.head = 0;
+                    state.tail = 0;
+                    state.count = 0;
+                    break;
 
-                // Update queued marble count
-                collectorState.state.queuedMarbles -= marblesToDequeue;
-            }
+                case 1: // Smart FIFO – single release
+                    if (state.count > 0)
+                    {
+                        var queueIndex = (int)(state.head & MASK);
+                        if (queueIndex < queue.Length)
+                        {
+                            var queueElem = queue[queueIndex];
+                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                            
+                            // Update circular buffer indices
+                            state.head = (state.head + 1) & MASK;
+                            state.count--;
+                        }
+                    }
+                    break;
 
-            [BurstCompile]
-            private int3 CalculateCollectorOutput(int3 collectorPos, ModuleRef moduleRef)
-            {
-                // Calculate output position based on collector orientation
-                // This would use the module's blob data to determine output socket position
-                
-                // Simplified calculation - in reality this would read from blob asset
-                return collectorPos + new int3(0, 0, 1); // Forward output
-            }
+                case 2: // Burst-N (configurable)
+                    uint burst = math.min(state.burstSize, state.count);
+                    for (uint i = 0; i < burst; i++)
+                    {
+                        var queueIndex = (int)((state.head + i) & MASK);
+                        if (queueIndex < queue.Length)
+                        {
+                            var queueElem = queue[queueIndex];
+                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                        }
+                    }
+                    // Update circular buffer indices
+                    state.head = (state.head + burst) & MASK;
+                    state.count -= burst;
+                    break;
 
-            [BurstCompile]
-            private Entity GetQueuedMarble(Entity collectorEntity, int queueIndex)
-            {
-                // In a full implementation, this would:
-                // 1. Access the collector's marble queue (DynamicBuffer<QueuedMarble>)
-                // 2. Return the marble entity at the specified queue index
-                // 3. Handle FIFO ordering for level 1+ collectors
-                
-                // Placeholder - would return actual queued marble
-                return Entity.Null;
+                default:
+                    // Unknown level, treat as basic
+                    goto case 0;
             }
+        }
+
+        /// <summary>
+        /// Spawns a marble out of the collector
+        /// From marble lifecycle: "Spawning is done through an EntityCommandBuffer"
+        /// </summary>
+        [BurstCompile]
+        private void SpawnMarbleOut(EntityCommandBuffer ecb, EntityArchetype marbleArchetype, Entity sourceMarble)
+        {
+            // For now, create a new marble entity
+            // In a full implementation, this would move the existing marble to the output position
+            var newMarble = ecb.CreateEntity(marbleArchetype);
+            
+            // Set initial position (would be collector's output position)
+            var outputPosition = ECSUtils.CellIndexToPosition(new int3(0, 0, 0)); // TODO: Get actual output position
+            ecb.SetComponent(newMarble, outputPosition);
+            
+            // Set initial velocity
+            ecb.SetComponent(newMarble, VelocityFP.Zero);
+            
+            // Set initial acceleration
+            ecb.SetComponent(newMarble, AccelerationFP.Zero);
+            
+            // Set cell index
+            ecb.SetComponent(newMarble, new CellIndex(0, 0, 0)); // TODO: Get actual output cell
+            
+            // Add marble tag
+            ecb.AddComponent<MarbleTag>(newMarble);
+            
+            // Destroy the source marble (it was queued)
+            ecb.DestroyEntity(sourceMarble);
         }
     }
 
     /// <summary>
-    /// Component for collector marble queue management
+    /// System for enqueuing marbles into collectors
+    /// This runs before the dequeue system to handle incoming marbles
     /// </summary>
-    public struct QueuedMarble : IBufferElementData
+    [UpdateInGroup(typeof(ModuleLogicGroup))]
+    [UpdateBefore(typeof(CollectorDequeueSystem))]
+    [BurstCompile]
+    public partial struct CollectorEnqueueSystem : ISystem
     {
-        public Entity marbleEntity;
-        public float queueTime;      // Time when marble entered queue
-        public int queuePosition;    // Position in queue (for FIFO)
-    }
+        [BurstCompile]
+        public void OnCreate(ref SystemState state)
+        {
+            // System requires collector entities to process
+            state.RequireForUpdate<ModuleState<CollectorState>>();
+        }
 
-    /// <summary>
-    /// Helper component for collector input/output management
-    /// </summary>
-    public struct CollectorIO : IComponentData
-    {
-        public int maxQueueSize;     // Maximum marbles that can be queued
-        public float releaseDelay;   // Delay between marble releases (for timing control)
-        public float lastReleaseTime; // Time of last marble release
-        public bool isBlocked;       // True if output is blocked
+        [BurstCompile]
+        public void OnUpdate(ref SystemState state)
+        {
+            // Get current tick for deterministic ordering
+            var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
+
+            // Process marble enqueue requests
+            // This would be called when marbles reach collector input positions
+            // For now, this system serves as a placeholder for the enqueue logic
+            
+            // In a full implementation, this would:
+            // 1. Detect marbles at collector input positions
+            // 2. Add them to the collector's queue buffer
+            // 3. Update the collector state count
+            
+            // Example enqueue logic:
+            /*
+            foreach (var (collectorState, queueBuffer, entity) in 
+                SystemAPI.Query<RefRW<ModuleState<CollectorState>>, DynamicBuffer<CollectorQueueElem>>()
+                .WithEntityAccess())
+            {
+                // Check for marbles at collector input
+                // var incomingMarbles = GetMarblesAtCollectorInput(entity);
+                // foreach (var marble in incomingMarbles)
+                // {
+                //     EnqueueMarble(ref collectorState.ValueRW.state, queueBuffer, marble, currentTick);
+                // }
+            }
+            */
+        }
+
+        /// <summary>
+        /// Enqueues a marble into a collector
+        /// From collector docs: "Enqueue logic inside CollectorEnqueueSystem"
+        /// </summary>
+        [BurstCompile]
+        private void EnqueueMarble(ref CollectorState state, DynamicBuffer<CollectorQueueElem> queue, 
+            Entity marble, long enqueueTick)
+        {
+            // Add marble to queue
+            var queueElem = new CollectorQueueElem
+            {
+                marble = marble,
+                enqueueTick = enqueueTick
+            };
+            
+            queue.Add(queueElem);
+            
+            // Update state
+            state.count++;
+            state.tail = (state.tail + 1) & 0xFFFFFFFF; // Circular buffer
+        }
     }
 }
