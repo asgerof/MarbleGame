@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MarbleMaker.Core;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -15,25 +16,25 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct CollectorDequeueSystem : ISystem
     {
-        private EntityArchetype marbleArchetype;
-        private bool archetypeInitialized;
+        private EntityArchetype _marbleArchetype;
+        private bool _archetypeInitialized;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             // System requires collector entities to process
             state.RequireForUpdate<CollectorState>();
-            archetypeInitialized = false;
+            _archetypeInitialized = false;
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             // Initialize marble archetype if not done yet
-            if (!archetypeInitialized)
+            if (!_archetypeInitialized)
             {
                 InitializeMarbleArchetype(ref state);
-                archetypeInitialized = true;
+                _archetypeInitialized = true;
             }
 
             // Get ECB for marble spawning
@@ -47,7 +48,7 @@ namespace MarbleMaker.Core.ECS
             {
                 if (collectorState.ValueRO.count > 0)
                 {
-                    ProcessCollectorDequeue(ref collectorState.ValueRW, queueBuffer, ecb, marbleArchetype);
+                    ProcessCollectorDequeue(ref collectorState.ValueRW, queueBuffer, ecb, _marbleArchetype);
                 }
             }
         }
@@ -58,7 +59,7 @@ namespace MarbleMaker.Core.ECS
         private void InitializeMarbleArchetype(ref SystemState state)
         {
             var entityManager = state.EntityManager;
-            marbleArchetype = entityManager.CreateArchetype(
+            _marbleArchetype = entityManager.CreateArchetype(
                 typeof(TranslationFP),
                 typeof(VelocityFP),
                 typeof(AccelerationFP),
@@ -76,7 +77,7 @@ namespace MarbleMaker.Core.ECS
             EntityCommandBuffer ecb, EntityArchetype marbleArchetype)
         {
             // Ensure power-of-two capacity for efficient masking
-            int capacity = NextPowerOfTwo(math.max(queue.Capacity, 16));
+            int capacity = MathUtils.NextPowerOfTwo(math.max(queue.Capacity, 16));
             if (queue.Capacity < capacity)
             {
                 queue.Capacity = capacity;
@@ -92,7 +93,7 @@ namespace MarbleMaker.Core.ECS
                         if (queueIndex < queue.Length)
                         {
                             var queueElem = queue[queueIndex];
-                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                            ReleaseMarble(ecb, queueElem.marble);
                         }
                     }
                     // Clear the queue
@@ -109,7 +110,7 @@ namespace MarbleMaker.Core.ECS
                         if (queueIndex < queue.Length)
                         {
                             var queueElem = queue[queueIndex];
-                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                            ReleaseMarble(ecb, queueElem.marble);
                             
                             // Update circular buffer indices
                             state.head = (state.head + 1) & MASK;
@@ -126,7 +127,7 @@ namespace MarbleMaker.Core.ECS
                         if (queueIndex < queue.Length)
                         {
                             var queueElem = queue[queueIndex];
-                            SpawnMarbleOut(ecb, marbleArchetype, queueElem.marble);
+                            ReleaseMarble(ecb, queueElem.marble);
                         }
                     }
                     // Update circular buffer indices
@@ -141,52 +142,30 @@ namespace MarbleMaker.Core.ECS
         }
 
         /// <summary>
-        /// Spawns a marble out of the collector
-        /// From marble lifecycle: "Spawning is done through an EntityCommandBuffer"
+        /// Releases a marble from the collector by moving it to the output position
+        /// From dev feedback: "Move the existing entity and reset its components instead of churn"
         /// </summary>
         [BurstCompile]
-        private void SpawnMarbleOut(EntityCommandBuffer ecb, EntityArchetype marbleArchetype, Entity sourceMarble)
+        private void ReleaseMarble(EntityCommandBuffer ecb, Entity marble)
         {
-            // For now, create a new marble entity
-            // In a full implementation, this would move the existing marble to the output position
-            var newMarble = ecb.CreateEntity(marbleArchetype);
-            
-            // Set initial position (would be collector's output position)
+            // Move the existing marble to the output position instead of destroying/creating
             var outputPosition = ECSUtils.CellIndexToPosition(new int3(0, 0, 0)); // TODO: Get actual output position
-            ecb.SetComponent(newMarble, outputPosition);
+            ecb.SetComponent(marble, outputPosition);
             
-            // Set initial velocity
-            ecb.SetComponent(newMarble, VelocityFP.Zero);
+            // Reset velocity to zero (marbles start stationary when released)
+            ecb.SetComponent(marble, VelocityFP.Zero);
             
-            // Set initial acceleration
-            ecb.SetComponent(newMarble, AccelerationFP.Zero);
+            // Reset acceleration to zero
+            ecb.SetComponent(marble, AccelerationFP.Zero);
             
-            // Set cell index
-            ecb.SetComponent(newMarble, new CellIndex(0, 0, 0)); // TODO: Get actual output cell
+            // Update cell index to output position
+            ecb.SetComponent(marble, new CellIndex(0, 0, 0)); // TODO: Get actual output cell
             
-            // Add marble tag
-            ecb.AddComponent<MarbleTag>(newMarble);
-            
-            // Destroy the source marble (it was queued)
-            ecb.DestroyEntity(sourceMarble);
+            // The marble already has MarbleTag, no need to add it again
+            // This approach reuses the existing entity instead of creating/destroying
         }
         
-        /// <summary>
-        /// Calculates the next power of two greater than or equal to the given value
-        /// </summary>
-        [BurstCompile]
-        private int NextPowerOfTwo(int value)
-        {
-            if (value <= 0) return 1;
-            if ((value & (value - 1)) == 0) return value; // Already power of 2
-            
-            int result = 1;
-            while (result < value)
-            {
-                result <<= 1;
-            }
-            return result;
-        }
+
     }
 
     /// <summary>

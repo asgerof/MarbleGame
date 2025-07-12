@@ -65,12 +65,12 @@ namespace MarbleMaker.Core.ECS
             // Use 128-bit arithmetic when available
             return (long)((Int128)a << FRACTIONAL_BITS / b);
 #else
-            // Fallback: prevent overflow in the shift
+            // Fallback: prevent overflow in the shift by using ulong arithmetic
             if (b == 0) return 0; // Avoid division by zero
             
             // For Q32.32 division, we need to shift the dividend left by 32 bits
-            // To prevent overflow, we use 64-bit arithmetic carefully
-            return (a << FRACTIONAL_BITS) / b;
+            // To prevent overflow, we cast to ulong before shifting
+            return (long)(((ulong)a << FRACTIONAL_BITS) / (ulong)b);
 #endif
         }
         

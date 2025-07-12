@@ -33,12 +33,11 @@ namespace MarbleMaker.Core.ECS
         public void OnUpdate(ref SystemState state)
         {
             // Create job for parallel processing
+            // Note: Acceleration is now calculated by ModulatedAccelerationSystem
             var marbleIntegrateJob = new MarbleIntegrateJob
             {
                 deltaTime = TICK_DURATION_FP,
                 terminalSpeed = TERMINAL_SPEED_FP,
-                gravityAccel = GRAVITY_ACCEL_FP,
-                frictionAccel = FRICTION_ACCEL_FP,
                 cellSize = CELL_SIZE_FP
             };
 
@@ -50,37 +49,31 @@ namespace MarbleMaker.Core.ECS
     /// <summary>
     /// Job to integrate marble physics with fixed-point arithmetic
     /// From TDD: "v += a * Δ; clamp; p += v * Δ • Writes new CellIndex when crossing grid border"
+    /// Note: Acceleration is now calculated by ModulatedAccelerationSystem before this job runs
     /// </summary>
     [BurstCompile]
     public struct MarbleIntegrateJob : IJobEntity
     {
         [ReadOnly] public long deltaTime;
         [ReadOnly] public long terminalSpeed;
-        [ReadOnly] public long gravityAccel;
-        [ReadOnly] public long frictionAccel;
         [ReadOnly] public long cellSize;
 
-        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, ref AccelerationFP acceleration, ref CellIndex cellIndex)
+        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, in AccelerationFP acceleration, ref CellIndex cellIndex)
         {
-            // Step 1: Calculate acceleration based on ramp angle and friction
-            // For now, apply base gravity and friction (module-specific acceleration will be added via ModuleRef)
-            long totalAccel = gravityAccel + frictionAccel;
-            acceleration.value = totalAccel;
-
-            // Step 2: Integrate velocity: v += a * Δt
+            // Step 1: Integrate velocity: v += a * Δt
+            // Acceleration is already calculated by ModulatedAccelerationSystem
             velocity.value += FixedPoint.Mul(acceleration.value, deltaTime);
 
-            // Step 3: Clamp velocity to terminal speed
+            // Step 2: Clamp velocity to terminal speed
             if (velocity.value > terminalSpeed)
                 velocity.value = terminalSpeed;
             else if (velocity.value < -terminalSpeed)
                 velocity.value = -terminalSpeed;
 
-            // Step 4: Integrate position: p += v * Δt
-            long oldPosition = translation.value;
+            // Step 3: Integrate position: p += v * Δt
             translation.value += FixedPoint.Mul(velocity.value, deltaTime);
 
-            // Step 5: Update CellIndex when crossing grid border
+            // Step 4: Update CellIndex when crossing grid border
             var newCellIndex = CalculateCellIndex(translation.value);
             if (!newCellIndex.xyz.Equals(cellIndex.xyz))
             {
@@ -104,69 +97,5 @@ namespace MarbleMaker.Core.ECS
         }
     }
 
-    /// <summary>
-    /// Advanced marble integrate job with module-specific physics
-    /// This version considers ConnectorRef and ModuleRef for varying acceleration
-    /// </summary>
-    [BurstCompile]
-    public struct AdvancedMarbleIntegrateJob : IJobEntity
-    {
-        [ReadOnly] public long deltaTime;
-        [ReadOnly] public long terminalSpeed;
-        [ReadOnly] public long baseGravityAccel;
-        [ReadOnly] public long baseFrictionAccel;
-        [ReadOnly] public ComponentLookup<ModuleRef> moduleRefLookup;
-        [ReadOnly] public ComponentLookup<ConnectorRef> connectorRefLookup;
 
-        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, ref AccelerationFP acceleration, ref CellIndex cellIndex)
-        {
-            // Step 1: Calculate acceleration based on current cell's module/connector
-            long totalAccel = CalculateAcceleration(cellIndex.xyz);
-            acceleration.value = totalAccel;
-
-            // Step 2: Integrate velocity: v += a * Δt
-            velocity.value += FixedPoint.Mul(acceleration.value, deltaTime);
-
-            // Step 3: Clamp velocity to terminal speed
-            if (velocity.value > terminalSpeed)
-                velocity.value = terminalSpeed;
-            else if (velocity.value < -terminalSpeed)
-                velocity.value = -terminalSpeed;
-
-            // Step 4: Integrate position: p += v * Δt
-            translation.value += FixedPoint.Mul(velocity.value, deltaTime);
-
-            // Step 5: Update CellIndex when crossing grid border
-            var newCellIndex = CalculateCellIndex(translation.value);
-            if (!newCellIndex.xyz.Equals(cellIndex.xyz))
-            {
-                cellIndex.xyz = newCellIndex.xyz;
-            }
-        }
-
-        /// <summary>
-        /// Calculates acceleration based on the module/connector in the current cell
-        /// </summary>
-        [BurstCompile]
-        private long CalculateAcceleration(int3 cellPos)
-        {
-            // TODO: Look up module/connector at cellPos and apply its physics constants
-            // For now, return base physics values
-            return baseGravityAccel + baseFrictionAccel;
-        }
-
-        /// <summary>
-        /// Calculates cell index from fixed-point position
-        /// </summary>
-        [BurstCompile]
-        private CellIndex CalculateCellIndex(long positionFP)
-        {
-            // Convert Q32.32 fixed-point to integer grid position using pure integer math
-            int cellX = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
-            int cellY = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
-            int cellZ = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
-            
-            return new CellIndex(cellX, cellY, cellZ);
-        }
-    }
 }
