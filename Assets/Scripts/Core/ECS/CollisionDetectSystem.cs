@@ -25,6 +25,7 @@ namespace MarbleMaker.Core.ECS
         private NativeList<ulong> uniqueKeys;
         private NativeHashSet<ulong> processedKeys; // Persistent to avoid per-frame allocation
         private NativeList<CollisionPair> collisionPairs; // For parallel collision processing
+        private NativeList<MarbleHandle> allMarbles; // Persistent storage for marble handles
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -43,6 +44,7 @@ namespace MarbleMaker.Core.ECS
             uniqueKeys = new NativeList<ulong>(1000, Allocator.Persistent);
             processedKeys = new NativeHashSet<ulong>(1000, Allocator.Persistent);
             collisionPairs = new NativeList<CollisionPair>(1000, Allocator.Persistent);
+            allMarbles = new NativeList<MarbleHandle>(capacity, Allocator.Persistent);
         }
 
         [BurstCompile]
@@ -56,6 +58,7 @@ namespace MarbleMaker.Core.ECS
             if (uniqueKeys.IsCreated) uniqueKeys.Dispose();
             if (processedKeys.IsCreated) processedKeys.Dispose();
             if (collisionPairs.IsCreated) collisionPairs.Dispose();
+            if (allMarbles.IsCreated) allMarbles.Dispose();
         }
 
         [BurstCompile]
@@ -69,6 +72,7 @@ namespace MarbleMaker.Core.ECS
             uniqueKeys.FastClear();
             processedKeys.Clear();
             collisionPairs.FastClear();
+            allMarbles.FastClear();
 
             // Get current tick for deterministic ordering
             var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
@@ -88,6 +92,10 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = populateMarbleHashJob.ScheduleParallel(state.Dependency);
 
+            // Step 2.5: Extract unique keys from cell hash
+            state.Dependency.Complete();
+            cellHash.GetKeyArray(ref uniqueKeys);
+
             // Step 3: Generate collision pairs for parallel processing
             var generatePairsJob = new GenerateCollisionPairsJob
             {
@@ -95,7 +103,8 @@ namespace MarbleMaker.Core.ECS
                 debrisCells = debrisCells,
                 uniqueKeys = uniqueKeys,
                 processedKeys = processedKeys,
-                collisionPairs = collisionPairs
+                collisionPairs = collisionPairs,
+                allMarbles = allMarbles
             };
             state.Dependency = generatePairsJob.Schedule(state.Dependency);
 
@@ -103,6 +112,7 @@ namespace MarbleMaker.Core.ECS
             var processCollisionPairsJob = new ProcessCollisionPairsJob
             {
                 collisionPairs = collisionPairs.AsArray(),
+                allMarbles = allMarbles.AsArray(),
                 marblesToDestroy = marblesToDestroy.AsParallelWriter(),
                 debrisToSpawn = debrisToSpawn.AsParallelWriter()
             };
@@ -179,13 +189,15 @@ namespace MarbleMaker.Core.ECS
     public struct CollisionPair
     {
         public ulong cellKey;
-        public NativeArray<MarbleHandle> marbles;
+        public int start;
+        public int length;
         public bool hasDebris;
         
-        public CollisionPair(ulong cellKey, NativeArray<MarbleHandle> marbles, bool hasDebris)
+        public CollisionPair(ulong cellKey, int start, int length, bool hasDebris)
         {
             this.cellKey = cellKey;
-            this.marbles = marbles;
+            this.start = start;
+            this.length = length;
             this.hasDebris = hasDebris;
         }
     }
@@ -201,6 +213,7 @@ namespace MarbleMaker.Core.ECS
         [ReadOnly] public NativeList<ulong> uniqueKeys;
         public NativeHashSet<ulong> processedKeys;
         public NativeList<CollisionPair> collisionPairs;
+        public NativeList<MarbleHandle> allMarbles;
 
         public void Execute()
         {
@@ -215,26 +228,24 @@ namespace MarbleMaker.Core.ECS
 
                 processedKeys.Add(key);
 
-                // Get all marbles at this cell
-                var marbleList = new NativeList<MarbleHandle>(8, Allocator.Temp);
+                // Get all marbles at this cell and add them to the persistent list
+                var start = allMarbles.Length;
                 var iterator = cellHash.GetValuesForKey(key);
                 while (iterator.MoveNext())
                 {
-                    marbleList.Add(iterator.Current);
+                    allMarbles.Add(iterator.Current);
                 }
+                var length = allMarbles.Length - start;
 
                 // Check if this cell has debris
                 bool hasDebris = debrisCells.Contains(key);
 
                 // Create collision pair if there are marbles and either debris or multiple marbles
-                if (marbleList.Length > 0 && (hasDebris || marbleList.Length >= 2))
+                if (length > 0 && (hasDebris || length >= 2))
                 {
-                    var marblesArray = marbleList.AsArray();
-                    var collisionPair = new CollisionPair(key, marblesArray, hasDebris);
+                    var collisionPair = new CollisionPair(key, start, length, hasDebris);
                     collisionPairs.Add(collisionPair);
                 }
-
-                marbleList.Dispose();
             }
         }
     }
@@ -246,6 +257,7 @@ namespace MarbleMaker.Core.ECS
     public struct ProcessCollisionPairsJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<CollisionPair> collisionPairs;
+        [ReadOnly] public NativeArray<MarbleHandle> allMarbles;
         [WriteOnly] public NativeList<Entity>.ParallelWriter marblesToDestroy;
         [WriteOnly] public NativeList<int3>.ParallelWriter debrisToSpawn;
 
@@ -256,19 +268,19 @@ namespace MarbleMaker.Core.ECS
             if (collisionPair.hasDebris)
             {
                 // Marbles hitting debris are destroyed
-                for (int i = 0; i < collisionPair.marbles.Length; i++)
+                for (int i = 0; i < collisionPair.length; i++)
                 {
-                    var marbleHandle = collisionPair.marbles[i];
+                    var marbleHandle = allMarbles[collisionPair.start + i];
                     marblesToDestroy.AddNoResize(marbleHandle.MarbleEntity);
                 }
             }
-            else if (collisionPair.marbles.Length >= 2)
+            else if (collisionPair.length >= 2)
             {
                 // Marble-to-marble collision
                 // Destroy all marbles in collision
-                for (int i = 0; i < collisionPair.marbles.Length; i++)
+                for (int i = 0; i < collisionPair.length; i++)
                 {
-                    var marbleHandle = collisionPair.marbles[i];
+                    var marbleHandle = allMarbles[collisionPair.start + i];
                     marblesToDestroy.AddNoResize(marbleHandle.MarbleEntity);
                 }
 
