@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MarbleMaker.Core.ECS;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -24,7 +25,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires lift entities to process
-            state.RequireForUpdate<ModuleState<LiftState>>();
+            state.RequireForUpdate<LiftState>();
             
             // Initialize collections for marble movement
             marblesToMove = new NativeList<Entity>(1000, Allocator.Persistent);
@@ -45,9 +46,9 @@ namespace MarbleMaker.Core.ECS
         public void OnUpdate(ref SystemState state)
         {
             // Clear previous frame data
-            marblesToMove.Clear();
-            targetPositions.Clear();
-            targetVelocities.Clear();
+            marblesToMove.FastClear();
+            targetPositions.FastClear();
+            targetVelocities.FastClear();
 
             // Get ECB for marble movement
             var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
@@ -103,17 +104,17 @@ namespace MarbleMaker.Core.ECS
         public NativeList<int3> targetPositions;
         public NativeList<VelocityFP> targetVelocities;
 
-        public void Execute(Entity entity, ref ModuleState<LiftState> liftState, in CellIndex cellIndex)
+        public void Execute(Entity entity, ref LiftState liftState, in CellIndex cellIndex)
         {
             // Only process active lifts
-            if (!liftState.ValueRO.state.isActive)
+            if (!liftState.isActive)
                 return;
 
             // Check if lift has reached its target height
-            if (liftState.ValueRO.state.currentHeight >= liftState.ValueRO.state.targetHeight)
+            if (liftState.currentHeight >= liftState.targetHeight)
             {
                 // Lift has reached target, stop movement
-                liftState.ValueRW.state.isActive = false;
+                liftState.isActive = false;
                 return;
             }
 
@@ -132,7 +133,7 @@ namespace MarbleMaker.Core.ECS
                 targetVelocities.Add(liftVelocity);
 
                 // Update lift state
-                liftState.ValueRW.state.currentHeight++;
+                liftState.currentHeight++;
             }
         }
 
@@ -175,7 +176,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires lift entities to process
-            state.RequireForUpdate<ModuleState<LiftState>>();
+            state.RequireForUpdate<LiftState>();
         }
 
         [BurstCompile]
@@ -194,7 +195,7 @@ namespace MarbleMaker.Core.ECS
             // Example implementation:
             /*
             foreach (var (liftState, cellIndex, entity) in 
-                SystemAPI.Query<RefRW<ModuleState<LiftState>>, RefRO<CellIndex>>()
+                SystemAPI.Query<RefRW<LiftState>, RefRO<CellIndex>>()
                 .WithEntityAccess())
             {
                 // Check for marbles at lift loading position
@@ -211,7 +212,7 @@ namespace MarbleMaker.Core.ECS
         /// Loads a marble onto a lift platform
         /// </summary>
         [BurstCompile]
-        private void LoadMarbleOntoLift(Entity liftEntity, Entity marbleEntity, RefRW<ModuleState<LiftState>> liftState)
+        private void LoadMarbleOntoLift(Entity liftEntity, Entity marbleEntity, RefRW<LiftState> liftState)
         {
             // In a full implementation, this would:
             // 1. Stop the marble's horizontal movement
@@ -250,7 +251,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires lift entities to process
-            state.RequireForUpdate<ModuleState<LiftState>>();
+            state.RequireForUpdate<LiftState>();
         }
 
         [BurstCompile]
@@ -261,7 +262,7 @@ namespace MarbleMaker.Core.ECS
             
             // Process lift configuration
             foreach (var (liftState, entity) in 
-                SystemAPI.Query<RefRW<ModuleState<LiftState>>>().WithEntityAccess())
+                SystemAPI.Query<RefRW<LiftState>>().WithEntityAccess())
             {
                 // Configure lift if not already configured
                 if (liftState.ValueRO.state.targetHeight == 0)

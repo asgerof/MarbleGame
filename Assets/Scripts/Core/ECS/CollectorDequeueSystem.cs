@@ -22,7 +22,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires collector entities to process
-            state.RequireForUpdate<ModuleState<CollectorState>>();
+            state.RequireForUpdate<CollectorState>();
             archetypeInitialized = false;
         }
 
@@ -42,12 +42,12 @@ namespace MarbleMaker.Core.ECS
 
             // Process all collectors
             foreach (var (collectorState, queueBuffer, entity) in 
-                SystemAPI.Query<RefRW<ModuleState<CollectorState>>, DynamicBuffer<CollectorQueueElem>>()
+                SystemAPI.Query<RefRW<CollectorState>, DynamicBuffer<CollectorQueueElem>>()
                 .WithEntityAccess())
             {
-                if (collectorState.ValueRO.state.count > 0)
+                if (collectorState.ValueRO.count > 0)
                 {
-                    ProcessCollectorDequeue(ref collectorState.ValueRW.state, queueBuffer, ecb, marbleArchetype);
+                    ProcessCollectorDequeue(ref collectorState.ValueRW, queueBuffer, ecb, marbleArchetype);
                 }
             }
         }
@@ -75,7 +75,13 @@ namespace MarbleMaker.Core.ECS
         private void ProcessCollectorDequeue(ref CollectorState state, DynamicBuffer<CollectorQueueElem> queue, 
             EntityCommandBuffer ecb, EntityArchetype marbleArchetype)
         {
-            const uint MASK = 0xFFFFFFFF; // For circular buffer operations (will be set properly when buffer is power of 2)
+            // Ensure power-of-two capacity for efficient masking
+            int capacity = NextPowerOfTwo(math.max(queue.Capacity, 16));
+            if (queue.Capacity < capacity)
+            {
+                queue.Capacity = capacity;
+            }
+            uint MASK = (uint)(capacity - 1); // Power of 2 mask for circular buffer operations
 
             switch (state.level)
             {
@@ -164,6 +170,23 @@ namespace MarbleMaker.Core.ECS
             // Destroy the source marble (it was queued)
             ecb.DestroyEntity(sourceMarble);
         }
+        
+        /// <summary>
+        /// Calculates the next power of two greater than or equal to the given value
+        /// </summary>
+        [BurstCompile]
+        private int NextPowerOfTwo(int value)
+        {
+            if (value <= 0) return 1;
+            if ((value & (value - 1)) == 0) return value; // Already power of 2
+            
+            int result = 1;
+            while (result < value)
+            {
+                result <<= 1;
+            }
+            return result;
+        }
     }
 
     /// <summary>
@@ -179,7 +202,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires collector entities to process
-            state.RequireForUpdate<ModuleState<CollectorState>>();
+            state.RequireForUpdate<CollectorState>();
         }
 
         [BurstCompile]
@@ -200,14 +223,14 @@ namespace MarbleMaker.Core.ECS
             // Example enqueue logic:
             /*
             foreach (var (collectorState, queueBuffer, entity) in 
-                SystemAPI.Query<RefRW<ModuleState<CollectorState>>, DynamicBuffer<CollectorQueueElem>>()
+                SystemAPI.Query<RefRW<CollectorState>, DynamicBuffer<CollectorQueueElem>>()
                 .WithEntityAccess())
             {
                 // Check for marbles at collector input
                 // var incomingMarbles = GetMarblesAtCollectorInput(entity);
                 // foreach (var marble in incomingMarbles)
                 // {
-                //     EnqueueMarble(ref collectorState.ValueRW.state, queueBuffer, marble, currentTick);
+                //     EnqueueMarble(ref collectorState.ValueRW, queueBuffer, marble, currentTick);
                 // }
             }
             */

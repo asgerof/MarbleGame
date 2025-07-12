@@ -126,7 +126,7 @@ namespace MarbleMaker.Core.ECS
             accumulatedTime = 0f;
             
             // Clear pending commands
-            trackCmdBuffer.Clear();
+            trackCmdBuffer.FastClear();
             hasPendingCommands = false;
             
             if (enableDebugLogging)
@@ -259,7 +259,7 @@ namespace MarbleMaker.Core.ECS
             }
             
             // Clear applied commands
-            trackCmdBuffer.Clear();
+            trackCmdBuffer.FastClear();
             hasPendingCommands = false;
             
             if (enableDebugLogging)
@@ -368,55 +368,65 @@ namespace MarbleMaker.Core.ECS
         {
             // This would lookup the part definition and add the correct state component
             // For example:
-            // - Splitter → ModuleState<SplitterState>
-            // - Collector → ModuleState<CollectorState>
-            // - Lift → ModuleState<LiftState>
+            // - Splitter → SplitterState + SplitterTag
+            // - Collector → CollectorState + CollectorTag
+            // - Lift → LiftState + LiftTag
             
             // Placeholder implementation
             switch (partId)
             {
                 case 0: // Splitter
-                    entityManager.AddComponent<ModuleState<SplitterState>>(entity);
-                    var splitterState = new ModuleState<SplitterState>
+                    entityManager.AddComponent<SplitterState>(entity);
+                    entityManager.AddComponent<SplitterTag>(entity);
+                    var splitterState = new SplitterState
                     {
-                        state = new SplitterState
-                        {
-                            currentExit = 0,
-                            overrideExit = false,
-                            overrideValue = 0
-                        }
+                        currentExit = 0,
+                        overrideExit = false,
+                        overrideValue = 0
                     };
                     entityManager.SetComponentData(entity, splitterState);
                     break;
                     
                 case 1: // Collector
-                    entityManager.AddComponent<ModuleState<CollectorState>>(entity);
-                    var collectorState = new ModuleState<CollectorState>
+                    entityManager.AddComponent<CollectorState>(entity);
+                    entityManager.AddComponent<CollectorTag>(entity);
+                    var collectorState = new CollectorState
                     {
-                        state = new CollectorState
-                        {
-                            queuedMarbles = 0,
-                            upgradeLevel = upgradeLevel,
-                            burstSize = upgradeLevel == 2 ? 5 : 1
-                        }
+                        level = (byte)upgradeLevel,
+                        head = 0,
+                        tail = 0,
+                        count = 0,
+                        burstSize = upgradeLevel == 2 ? 5u : 1u
                     };
                     entityManager.SetComponentData(entity, collectorState);
                     break;
                     
                 case 2: // Lift
-                    entityManager.AddComponent<ModuleState<LiftState>>(entity);
-                    var liftState = new ModuleState<LiftState>
+                    entityManager.AddComponent<LiftState>(entity);
+                    entityManager.AddComponent<LiftTag>(entity);
+                    var liftState = new LiftState
                     {
-                        state = new LiftState
-                        {
-                            isActive = true,
-                            currentHeight = 0,
-                            targetHeight = 5
-                        }
+                        isActive = true,
+                        currentHeight = 0,
+                        targetHeight = 5
                     };
-                    entityManager.SetComponentData(entity, liftState);
-                    break;
-            }
+                                entityManager.SetComponentData(entity, liftState);
+            break;
         }
     }
+    
+    /// <summary>
+    /// Extension methods for fast clearing NativeList collections
+    /// </summary>
+    public static class NativeListExtensions
+    {
+        /// <summary>
+        /// Fast clears a NativeList by only setting Length to 0, keeping capacity
+        /// </summary>
+        public static void FastClear<T>(this NativeList<T> list) where T : unmanaged
+        {
+            list.Length = 0;  // keeps capacity
+        }
+    }
+}
 }

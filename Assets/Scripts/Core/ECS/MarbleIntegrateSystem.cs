@@ -16,11 +16,11 @@ namespace MarbleMaker.Core.ECS
     public partial struct MarbleIntegrateSystem : ISystem
     {
         // Fixed-point constants for deterministic physics
-        private const long TICK_DURATION_FP = 35791394L; // 1/120 in Q32.32 format
-        private const long TERMINAL_SPEED_FP = 21474836480L; // 5.0 in Q32.32 format
-        private const long GRAVITY_ACCEL_FP = 429496729L; // 0.1 in Q32.32 format
-        private const long FRICTION_ACCEL_FP = -214748364L; // -0.05 in Q32.32 format
-        private const long CELL_SIZE_FP = 4294967296L; // 1.0 in Q32.32 format
+        private static readonly long TICK_DURATION_FP = FixedPoint.FromFloat(1f / 120f); // 1/120 in Q32.32 format
+        private static readonly long TERMINAL_SPEED_FP = FixedPoint.FromFloat(5.0f); // 5.0 in Q32.32 format
+        private static readonly long GRAVITY_ACCEL_FP = FixedPoint.FromFloat(0.1f); // 0.1 in Q32.32 format
+        private static readonly long FRICTION_ACCEL_FP = FixedPoint.FromFloat(-0.05f); // -0.05 in Q32.32 format
+        private static readonly long CELL_SIZE_FP = FixedPoint.ONE; // 1.0 in Q32.32 format
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -68,7 +68,7 @@ namespace MarbleMaker.Core.ECS
             acceleration.value = totalAccel;
 
             // Step 2: Integrate velocity: v += a * Δt
-            velocity.value += acceleration.value * deltaTime / 4294967296L; // Divide by 2^32 for fixed-point multiplication
+            velocity.value += FixedPoint.Mul(acceleration.value, deltaTime);
 
             // Step 3: Clamp velocity to terminal speed
             if (velocity.value > terminalSpeed)
@@ -78,7 +78,7 @@ namespace MarbleMaker.Core.ECS
 
             // Step 4: Integrate position: p += v * Δt
             long oldPosition = translation.value;
-            translation.value += velocity.value * deltaTime / 4294967296L;
+            translation.value += FixedPoint.Mul(velocity.value, deltaTime);
 
             // Step 5: Update CellIndex when crossing grid border
             var newCellIndex = CalculateCellIndex(translation.value);
@@ -94,12 +94,11 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private CellIndex CalculateCellIndex(long positionFP)
         {
-            // Convert Q32.32 fixed-point to integer grid position
+            // Convert Q32.32 fixed-point to integer grid position using pure integer math
             // Position represents world coordinate, cell index is floor(position)
-            float worldPos = (float)positionFP / 4294967296f;
-            int cellX = (int)math.floor(worldPos);
-            int cellY = (int)math.floor(worldPos); // TODO: Separate Y coordinate when 3D movement is implemented
-            int cellZ = (int)math.floor(worldPos); // TODO: Separate Z coordinate when 3D movement is implemented
+            int cellX = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
+            int cellY = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS); // TODO: Separate Y coordinate when 3D movement is implemented
+            int cellZ = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS); // TODO: Separate Z coordinate when 3D movement is implemented
             
             return new CellIndex(cellX, cellY, cellZ);
         }
@@ -126,7 +125,7 @@ namespace MarbleMaker.Core.ECS
             acceleration.value = totalAccel;
 
             // Step 2: Integrate velocity: v += a * Δt
-            velocity.value += acceleration.value * deltaTime / 4294967296L;
+            velocity.value += FixedPoint.Mul(acceleration.value, deltaTime);
 
             // Step 3: Clamp velocity to terminal speed
             if (velocity.value > terminalSpeed)
@@ -135,7 +134,7 @@ namespace MarbleMaker.Core.ECS
                 velocity.value = -terminalSpeed;
 
             // Step 4: Integrate position: p += v * Δt
-            translation.value += velocity.value * deltaTime / 4294967296L;
+            translation.value += FixedPoint.Mul(velocity.value, deltaTime);
 
             // Step 5: Update CellIndex when crossing grid border
             var newCellIndex = CalculateCellIndex(translation.value);
@@ -162,10 +161,10 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private CellIndex CalculateCellIndex(long positionFP)
         {
-            float worldPos = (float)positionFP / 4294967296f;
-            int cellX = (int)math.floor(worldPos);
-            int cellY = (int)math.floor(worldPos);
-            int cellZ = (int)math.floor(worldPos);
+            // Convert Q32.32 fixed-point to integer grid position using pure integer math
+            int cellX = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
+            int cellY = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
+            int cellZ = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
             
             return new CellIndex(cellX, cellY, cellZ);
         }

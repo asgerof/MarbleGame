@@ -11,8 +11,8 @@ namespace MarbleMaker.Core.ECS
     {
         public long value;                 // Q32.32 fixed-point
         
-        public static TranslationFP FromFloat(float f) => new() { value = (long)(f * 4294967296f) };
-        public float ToFloat() => (float)value / 4294967296f;
+        public static TranslationFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
+        public float ToFloat() => FixedPoint.ToFloat(value);
         
         public static TranslationFP Zero => new() { value = 0 };
     }
@@ -24,8 +24,8 @@ namespace MarbleMaker.Core.ECS
     {
         public long value;                 // Q32.32 fixed-point
         
-        public static VelocityFP FromFloat(float f) => new() { value = (long)(f * 4294967296f) };
-        public float ToFloat() => (float)value / 4294967296f;
+        public static VelocityFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
+        public float ToFloat() => FixedPoint.ToFloat(value);
         
         public static VelocityFP Zero => new() { value = 0 };
     }
@@ -37,8 +37,8 @@ namespace MarbleMaker.Core.ECS
     {
         public long value;                 // Q32.32 fixed-point
         
-        public static AccelerationFP FromFloat(float f) => new() { value = (long)(f * 4294967296f) };
-        public float ToFloat() => (float)value / 4294967296f;
+        public static AccelerationFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
+        public float ToFloat() => FixedPoint.ToFloat(value);
         
         public static AccelerationFP Zero => new() { value = 0 };
     }
@@ -101,18 +101,10 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Generic module state component
-    /// From ECS docs: "ModuleState<T>"
+    /// Concrete module state component for splitters
+    /// From ECS docs: "ModuleState<T>" - replaced with concrete components to avoid archetype explosion
     /// </summary>
-    public struct ModuleState<T> : IComponentData where T : unmanaged
-    {
-        public T state;
-    }
-
-    /// <summary>
-    /// Splitter module state
-    /// </summary>
-    public struct SplitterState
+    public struct SplitterState : IComponentData
     {
         public int currentExit;     // 0 or 1 for two-way splitter
         public bool overrideExit;   // true if player clicked to override
@@ -120,10 +112,10 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Collector module state
+    /// Concrete module state component for collectors
     /// From collector docs: "CollectorState with circular buffer indices"
     /// </summary>
-    public struct CollectorState
+    public struct CollectorState : IComponentData
     {
         public byte level;              // 0 = Basic, 1 = FIFO, 2 = Burst-4 ...
         public uint head;               // circular buffer index
@@ -133,13 +125,37 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Lift module state
+    /// Concrete module state component for lifts
     /// </summary>
-    public struct LiftState
+    public struct LiftState : IComponentData
     {
         public bool isActive;       // true if lift is moving
         public int currentHeight;   // current height position
         public int targetHeight;    // target height position
+    }
+
+    /// <summary>
+    /// Tag component for splitter modules
+    /// </summary>
+    public struct SplitterTag : IComponentData
+    {
+        // Tag component - no data needed
+    }
+
+    /// <summary>
+    /// Tag component for collector modules
+    /// </summary>
+    public struct CollectorTag : IComponentData
+    {
+        // Tag component - no data needed
+    }
+
+    /// <summary>
+    /// Tag component for lift modules
+    /// </summary>
+    public struct LiftTag : IComponentData
+    {
+        // Tag component - no data needed
     }
 
     /// <summary>
@@ -179,16 +195,16 @@ namespace MarbleMaker.Core.ECS
 
     /// <summary>
     /// Marble handle for collision detection
-    /// Used in NativeMultiHashMap<ulong, MarbleHandle> - entity index as uint for no pointer chasing
+    /// Used in NativeMultiHashMap<ulong, MarbleHandle> - stores full entity for safe access
     /// </summary>
     public struct MarbleHandle
     {
-        public uint entityIndex;        // Entity index for fast lookup
+        public Entity MarbleEntity;     // Full entity for safe lookup
         public long absoluteTick;       // Tick when marble was created for deterministic ordering
         
-        public MarbleHandle(uint index, long tick)
+        public MarbleHandle(Entity entity, long tick)
         {
-            entityIndex = index;
+            MarbleEntity = entity;
             absoluteTick = tick;
         }
     }
@@ -287,12 +303,12 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         public static int3 PositionToCellIndex(TranslationFP position)
         {
-            // Convert from Q32.32 fixed-point to grid cell
-            float worldPos = position.ToFloat();
+            // Convert from Q32.32 fixed-point to grid cell using pure integer math
+            int cellCoord = FixedPoint.ToInt(position.value);
             return new int3(
-                (int)math.floor(worldPos),
-                (int)math.floor(worldPos), 
-                (int)math.floor(worldPos)
+                cellCoord,
+                cellCoord, 
+                cellCoord
             );
         }
 
@@ -302,8 +318,8 @@ namespace MarbleMaker.Core.ECS
         public static TranslationFP CellIndexToPosition(int3 cellIndex)
         {
             // Convert grid cell to world position (center of cell)
-            float worldPos = cellIndex.x + 0.5f;
-            return TranslationFP.FromFloat(worldPos);
+            long worldPos = FixedPoint.FromInt(cellIndex.x) + FixedPoint.HALF;
+            return new TranslationFP { value = worldPos };
         }
     }
 }

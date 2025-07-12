@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MarbleMaker.Core.ECS;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -25,7 +26,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // System requires splitter entities to process
-            state.RequireForUpdate<ModuleState<SplitterState>>();
+            state.RequireForUpdate<SplitterState>();
             
             // Initialize collections for marble routing
             marblesToRoute = new NativeList<Entity>(1000, Allocator.Persistent);
@@ -54,9 +55,9 @@ namespace MarbleMaker.Core.ECS
             }
 
             // Clear previous frame data
-            marblesToRoute.Clear();
-            routingDestinations.Clear();
-            routingExits.Clear();
+            marblesToRoute.FastClear();
+            routingDestinations.FastClear();
+            routingExits.FastClear();
 
             // Get ECB for marble routing
             var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
@@ -154,7 +155,7 @@ namespace MarbleMaker.Core.ECS
         public NativeList<int3> routingDestinations;
         public NativeList<int> routingExits;
 
-        public void Execute(Entity entity, ref ModuleState<SplitterState> splitterState, in CellIndex cellIndex)
+        public void Execute(Entity entity, ref SplitterState splitterState, in CellIndex cellIndex)
         {
             // Check if there are marbles to route at this splitter
             // In a full implementation, this would check for marbles at the splitter's input position
@@ -165,7 +166,7 @@ namespace MarbleMaker.Core.ECS
             if (hasIncomingMarble)
             {
                 // Determine which exit to use
-                int exitToUse = DetermineExitToUse(ref splitterState.ValueRW.state);
+                int exitToUse = DetermineExitToUse(ref splitterState);
                 
                 // Calculate output position based on exit
                 var outputPosition = CalculateOutputPosition(cellIndex.xyz, exitToUse);
@@ -180,10 +181,10 @@ namespace MarbleMaker.Core.ECS
                 }
                 
                 // Update splitter state for next marble (if not overridden)
-                if (!splitterState.ValueRO.state.overrideExit)
+                if (!splitterState.overrideExit)
                 {
                     // Toggle exit for round-robin behavior
-                    splitterState.ValueRW.state.currentExit = splitterState.ValueRO.state.currentExit == 0 ? 1 : 0;
+                    splitterState.currentExit = splitterState.currentExit == 0 ? 1 : 0;
                 }
             }
         }

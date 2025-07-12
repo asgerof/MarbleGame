@@ -75,17 +75,17 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private void ApplySplitterToggle(ref SystemState state, EntityCommandBuffer ecb, Entity targetEntity)
         {
-            if (SystemAPI.HasComponent<ModuleState<SplitterState>>(targetEntity))
+            if (SystemAPI.HasComponent<SplitterState>(targetEntity))
             {
-                var splitterState = SystemAPI.GetComponent<ModuleState<SplitterState>>(targetEntity);
+                var splitterState = SystemAPI.GetComponent<SplitterState>(targetEntity);
                 
                 // Toggle the exit override
-                splitterState.state.overrideExit = !splitterState.state.overrideExit;
+                splitterState.overrideExit = !splitterState.overrideExit;
                 
                 // If overriding, set the override value to the opposite of current exit
-                if (splitterState.state.overrideExit)
+                if (splitterState.overrideExit)
                 {
-                    splitterState.state.overrideValue = splitterState.state.currentExit == 0 ? 1 : 0;
+                    splitterState.overrideValue = splitterState.currentExit == 0 ? 1 : 0;
                 }
                 
                 ecb.SetComponent(targetEntity, splitterState);
@@ -95,12 +95,12 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private void ApplyLiftToggle(ref SystemState state, EntityCommandBuffer ecb, Entity targetEntity)
         {
-            if (SystemAPI.HasComponent<ModuleState<LiftState>>(targetEntity))
+            if (SystemAPI.HasComponent<LiftState>(targetEntity))
             {
-                var liftState = SystemAPI.GetComponent<ModuleState<LiftState>>(targetEntity);
+                var liftState = SystemAPI.GetComponent<LiftState>(targetEntity);
                 
                 // Toggle the active state
-                liftState.state.isActive = !liftState.state.isActive;
+                liftState.isActive = !liftState.isActive;
                 
                 ecb.SetComponent(targetEntity, liftState);
             }
@@ -109,12 +109,12 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private void ApplyCollectorToggle(ref SystemState state, EntityCommandBuffer ecb, Entity targetEntity)
         {
-            if (SystemAPI.HasComponent<ModuleState<CollectorState>>(targetEntity))
+            if (SystemAPI.HasComponent<CollectorState>(targetEntity))
             {
-                var collectorState = SystemAPI.GetComponent<ModuleState<CollectorState>>(targetEntity);
+                var collectorState = SystemAPI.GetComponent<CollectorState>(targetEntity);
                 
                 // Cycle through upgrade levels (basic → FIFO → burst control)
-                collectorState.state.upgradeLevel = (collectorState.state.upgradeLevel + 1) % 3;
+                collectorState.level = (byte)((collectorState.level + 1) % 3);
                 
                 ecb.SetComponent(targetEntity, collectorState);
             }

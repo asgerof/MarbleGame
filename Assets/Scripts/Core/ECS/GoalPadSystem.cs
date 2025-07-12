@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MarbleMaker.Core.ECS;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -44,9 +45,9 @@ namespace MarbleMaker.Core.ECS
         public void OnUpdate(ref SystemState state)
         {
             // Clear previous frame data
-            marblesToDestroy.Clear();
-            coinRewards.Clear();
-            goalPadsToUpdate.Clear();
+            marblesToDestroy.FastClear();
+            coinRewards.FastClear();
+            goalPadsToUpdate.FastClear();
 
             // Get ECB for marble destruction
             var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
