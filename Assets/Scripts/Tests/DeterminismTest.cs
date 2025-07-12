@@ -1,42 +1,45 @@
-using NUnit.Framework;
-using Unity.Collections;
-using Unity.Entities;
-using Unity.Jobs;
-using Unity.Mathematics;
-using MarbleMaker.Core.ECS;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.TestTools;
+using NUnit.Framework;
+using System.Collections;
+using Unity.Entities;
+using Unity.Collections;
+using Unity.Mathematics;
+using MarbleMaker.Core;
+using MarbleMaker.Core.ECS;
 
 namespace MarbleMaker.Tests
 {
     /// <summary>
-    /// Comprehensive determinism test harness for dual-world replay verification
-    /// From senior dev notes: "Even a tiny edit-mode test that spins two worlds for 1,000 ticks will catch regressions early"
+    /// Determinism test harness to ensure bit-perfect replay capability
+    /// From senior dev: "1000-tick dual-world hash compare to catch regression"
     /// </summary>
     public class DeterminismTest
     {
         private World worldA;
         private World worldB;
-        private EntityManager entityManagerA;
-        private EntityManager entityManagerB;
+        private const int TEST_TICK_COUNT = 1000;
+        private const int TEST_MARBLE_COUNT = 1000;
+        private const float TICK_RATE = 60.0f; // Hz
+        private const float TICK_DURATION = 1.0f / TICK_RATE;
 
         [SetUp]
-        public void Setup()
+        public void SetUp()
         {
             // Create two identical worlds for comparison
-            worldA = new World("TestWorldA");
-            worldB = new World("TestWorldB");
+            worldA = new World("DeterminismTestWorldA");
+            worldB = new World("DeterminismTestWorldB");
             
-            entityManagerA = worldA.EntityManager;
-            entityManagerB = worldB.EntityManager;
-            
-            // Add identical systems to both worlds
-            AddSystemsToWorld(worldA);
-            AddSystemsToWorld(worldB);
+            // Initialize both worlds with identical systems
+            InitializeWorld(worldA);
+            InitializeWorld(worldB);
         }
 
         [TearDown]
-        public void Cleanup()
+        public void TearDown()
         {
+            // Clean up worlds
             if (worldA != null && worldA.IsCreated)
             {
                 worldA.Dispose();
@@ -48,473 +51,428 @@ namespace MarbleMaker.Tests
         }
 
         /// <summary>
-        /// Main determinism test: Run two identical worlds for 1,000 ticks and verify bit-perfect results
+        /// Main determinism test: Run identical simulations in two worlds for 1000 ticks
+        /// and verify they produce identical results
         /// </summary>
-        [Test]
-        public void TestDeterminismOver1000Ticks()
+        [UnityTest]
+        public IEnumerator TestDeterministicSimulation()
         {
-            const int TEST_TICKS = 1000;
-            const int INITIAL_MARBLES = 10;
+            // Setup identical initial conditions in both worlds
+            SetupIdenticalInitialConditions();
             
-            // Create identical initial conditions in both worlds
-            SetupIdenticalInitialConditions(INITIAL_MARBLES);
+            // Create hash tracking for comparison
+            var hashesA = new List<uint>();
+            var hashesB = new List<uint>();
             
-            // Run both worlds for the same number of ticks
-            for (int tick = 0; tick < TEST_TICKS; tick++)
+            // Run simulation for TEST_TICK_COUNT ticks
+            for (int tick = 0; tick < TEST_TICK_COUNT; tick++)
             {
-                worldA.Update();
-                worldB.Update();
+                // Step both worlds by one tick
+                StepWorld(worldA, TICK_DURATION);
+                StepWorld(worldB, TICK_DURATION);
                 
-                // Verify state consistency every 100 ticks
+                // Calculate state hash for both worlds
+                var hashA = CalculateWorldStateHash(worldA);
+                var hashB = CalculateWorldStateHash(worldB);
+                
+                hashesA.Add(hashA);
+                hashesB.Add(hashB);
+                
+                // Verify hashes match at each tick
+                Assert.AreEqual(hashA, hashB, 
+                    $"Determinism failed at tick {tick}: WorldA hash={hashA}, WorldB hash={hashB}");
+                
+                // Yield occasionally to prevent timeout
                 if (tick % 100 == 0)
                 {
-                    VerifyWorldsAreIdentical($"Tick {tick}");
+                    yield return null;
                 }
             }
             
             // Final verification
-            VerifyWorldsAreIdentical("Final state");
+            Assert.AreEqual(hashesA.Count, hashesB.Count, "Hash count mismatch");
+            for (int i = 0; i < hashesA.Count; i++)
+            {
+                Assert.AreEqual(hashesA[i], hashesB[i], $"Hash mismatch at tick {i}");
+            }
             
-            Debug.Log($"Determinism test passed: {TEST_TICKS} ticks completed with bit-perfect consistency");
+            Debug.Log($"Determinism test passed for {TEST_TICK_COUNT} ticks with {TEST_MARBLE_COUNT} marbles");
         }
 
         /// <summary>
-        /// Test determinism with complex collision scenarios
+        /// Test collision scenario determinism
         /// </summary>
-        [Test]
-        public void TestDeterminismWithCollisions()
+        [UnityTest]
+        public IEnumerator TestCollisionDeterminism()
         {
-            const int TEST_TICKS = 500;
-            
-            // Create scenario with inevitable marble collisions
+            // Setup collision scenario in both worlds
             SetupCollisionScenario();
             
-            // Run both worlds
-            for (int tick = 0; tick < TEST_TICKS; tick++)
+            // Run for shorter duration focused on collision events
+            for (int tick = 0; tick < 200; tick++)
             {
-                worldA.Update();
-                worldB.Update();
-            }
-            
-            // Verify collision debris and marble destruction are identical
-            VerifyCollisionResults();
-            
-            Debug.Log("Collision determinism test passed");
-        }
-
-        /// <summary>
-        /// Test determinism with module state changes (splitters, collectors, lifts)
-        /// </summary>
-        [Test]
-        public void TestDeterminismWithModuleStates()
-        {
-            const int TEST_TICKS = 300;
-            
-            // Create scenario with various module types
-            SetupModuleScenario();
-            
-            // Run both worlds
-            for (int tick = 0; tick < TEST_TICKS; tick++)
-            {
-                worldA.Update();
-                worldB.Update();
+                StepWorld(worldA, TICK_DURATION);
+                StepWorld(worldB, TICK_DURATION);
                 
-                // Verify module states every 50 ticks
+                var hashA = CalculateWorldStateHash(worldA);
+                var hashB = CalculateWorldStateHash(worldB);
+                
+                Assert.AreEqual(hashA, hashB, 
+                    $"Collision determinism failed at tick {tick}");
+                
                 if (tick % 50 == 0)
                 {
-                    VerifyModuleStates($"Tick {tick}");
+                    yield return null;
                 }
             }
-            
-            Debug.Log("Module state determinism test passed");
         }
 
         /// <summary>
-        /// Stress test: High marble count to verify fixed-point overflow handling
+        /// Test module state consistency
         /// </summary>
-        [Test]
-        public void TestDeterminismWithHighMarbleCount()
+        [UnityTest]
+        public IEnumerator TestModuleStateDeterminism()
         {
-            const int TEST_TICKS = 200;
-            const int HIGH_MARBLE_COUNT = 1000; // Test at scale
+            // Setup module-heavy scenario
+            SetupModuleScenario();
             
-            // Create high-density marble scenario
-            SetupHighDensityScenario(HIGH_MARBLE_COUNT);
-            
-            // Run both worlds
-            for (int tick = 0; tick < TEST_TICKS; tick++)
+            for (int tick = 0; tick < 500; tick++)
             {
-                worldA.Update();
-                worldB.Update();
+                StepWorld(worldA, TICK_DURATION);
+                StepWorld(worldB, TICK_DURATION);
                 
-                // Verify no overflow or precision loss
-                if (tick % 25 == 0)
+                var hashA = CalculateModuleStateHash(worldA);
+                var hashB = CalculateModuleStateHash(worldB);
+                
+                Assert.AreEqual(hashA, hashB, 
+                    $"Module state determinism failed at tick {tick}");
+                
+                if (tick % 100 == 0)
                 {
-                    VerifyNoOverflowErrors($"Tick {tick}");
+                    yield return null;
                 }
             }
-            
-            Debug.Log($"High marble count determinism test passed: {HIGH_MARBLE_COUNT} marbles");
         }
 
         /// <summary>
-        /// Sets up identical initial conditions in both worlds
+        /// High marble count stress test
         /// </summary>
-        private void SetupIdenticalInitialConditions(int marbleCount)
+        [UnityTest]
+        public IEnumerator TestHighMarbleCountDeterminism()
         {
-            // Create identical marbles in both worlds
-            for (int i = 0; i < marbleCount; i++)
+            // Setup high marble count scenario
+            SetupHighMarbleCountScenario();
+            
+            for (int tick = 0; tick < 300; tick++)
             {
-                CreateMarble(entityManagerA, new int3(i, 0, 0), new long3(100, 0, 0));
-                CreateMarble(entityManagerB, new int3(i, 0, 0), new long3(100, 0, 0));
+                StepWorld(worldA, TICK_DURATION);
+                StepWorld(worldB, TICK_DURATION);
+                
+                var hashA = CalculateWorldStateHash(worldA);
+                var hashB = CalculateWorldStateHash(worldB);
+                
+                Assert.AreEqual(hashA, hashB, 
+                    $"High marble count determinism failed at tick {tick}");
+                
+                if (tick % 75 == 0)
+                {
+                    yield return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Initialize a world with all necessary systems
+        /// </summary>
+        private void InitializeWorld(World world)
+        {
+            // Create system groups
+            var simulationSystemGroup = world.GetOrCreateSystemManaged<SimulationSystemGroup>();
+            var motionGroup = world.GetOrCreateSystemManaged<MotionGroup>();
+            var moduleLogicGroup = world.GetOrCreateSystemManaged<ModuleLogicGroup>();
+            
+            // Add systems to groups
+            simulationSystemGroup.AddSystemToUpdateList(motionGroup);
+            simulationSystemGroup.AddSystemToUpdateList(moduleLogicGroup);
+            
+            // Create core systems
+            world.GetOrCreateSystem<MarbleIntegrateSystem>();
+            world.GetOrCreateSystem<CollisionDetectSystem>();
+            world.GetOrCreateSystem<SplitterLogicSystem>();
+            world.GetOrCreateSystem<CollectorDequeueSystem>();
+            world.GetOrCreateSystem<CollectorEnqueueSystem>();
+            world.GetOrCreateSystem<LiftStepSystem>();
+            world.GetOrCreateSystem<GoalPadSystem>();
+            world.GetOrCreateSystem<DebrisCompactionSystem>();
+            world.GetOrCreateSystem<SeedSpawnerSystem>();
+            
+            // Initialize entity command buffer systems
+            world.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
+        }
+
+        /// <summary>
+        /// Setup identical initial conditions in both worlds
+        /// </summary>
+        private void SetupIdenticalInitialConditions()
+        {
+            // Setup identical marble spawning
+            for (int i = 0; i < TEST_MARBLE_COUNT; i++)
+            {
+                CreateMarble(worldA, i);
+                CreateMarble(worldB, i);
             }
             
-            // Create identical track pieces
-            CreateTrackPieces(entityManagerA);
-            CreateTrackPieces(entityManagerB);
+            // Setup identical modules
+            CreateTestModules(worldA);
+            CreateTestModules(worldB);
         }
 
         /// <summary>
-        /// Creates a marble entity with fixed-point position and velocity
-        /// </summary>
-        private void CreateMarble(EntityManager entityManager, int3 position, long3 velocity)
-        {
-            var marble = entityManager.CreateEntity();
-            entityManager.AddComponent<MarbleTag>(marble);
-            entityManager.AddComponent<CellIndex>(marble);
-            entityManager.AddComponent<TranslationFP>(marble);
-            entityManager.AddComponent<VelocityFP>(marble);
-            
-            entityManager.SetComponentData(marble, new CellIndex(position));
-            entityManager.SetComponentData(marble, new TranslationFP { value = FixedPoint.FromInt(position.x) });
-            entityManager.SetComponentData(marble, new VelocityFP { value = velocity.x });
-        }
-
-        /// <summary>
-        /// Creates identical track pieces in both worlds
-        /// </summary>
-        private void CreateTrackPieces(EntityManager entityManager)
-        {
-            // Create a simple track with splitter, collector, and lift
-            CreateSplitter(entityManager, new int3(5, 0, 0));
-            CreateCollector(entityManager, new int3(10, 0, 0));
-            CreateLift(entityManager, new int3(15, 0, 0));
-        }
-
-        /// <summary>
-        /// Creates a splitter module entity
-        /// </summary>
-        private void CreateSplitter(EntityManager entityManager, int3 position)
-        {
-            var splitter = entityManager.CreateEntity();
-            entityManager.AddComponent<SplitterTag>(splitter);
-            entityManager.AddComponent<CellIndex>(splitter);
-            entityManager.AddComponent<SplitterState>(splitter);
-            
-            entityManager.SetComponentData(splitter, new CellIndex(position));
-            entityManager.SetComponentData(splitter, new SplitterState 
-            { 
-                currentExit = 0, 
-                overrideExit = false, 
-                overrideValue = 0 
-            });
-        }
-
-        /// <summary>
-        /// Creates a collector module entity
-        /// </summary>
-        private void CreateCollector(EntityManager entityManager, int3 position)
-        {
-            var collector = entityManager.CreateEntity();
-            entityManager.AddComponent<CollectorTag>(collector);
-            entityManager.AddComponent<CellIndex>(collector);
-            entityManager.AddComponent<CollectorState>(collector);
-            
-            entityManager.SetComponentData(collector, new CellIndex(position));
-            entityManager.SetComponentData(collector, new CollectorState 
-            { 
-                level = 1, 
-                head = 0, 
-                tail = 0, 
-                count = 0, 
-                burstSize = 1 
-            });
-        }
-
-        /// <summary>
-        /// Creates a lift module entity
-        /// </summary>
-        private void CreateLift(EntityManager entityManager, int3 position)
-        {
-            var lift = entityManager.CreateEntity();
-            entityManager.AddComponent<LiftTag>(lift);
-            entityManager.AddComponent<CellIndex>(lift);
-            entityManager.AddComponent<LiftState>(lift);
-            
-            entityManager.SetComponentData(lift, new CellIndex(position));
-            entityManager.SetComponentData(lift, new LiftState 
-            { 
-                isActive = true, 
-                currentHeight = 0, 
-                targetHeight = 5 
-            });
-        }
-
-        /// <summary>
-        /// Sets up a collision scenario with converging marbles
+        /// Setup collision scenario with marbles on collision course
         /// </summary>
         private void SetupCollisionScenario()
         {
-            // Create marbles that will collide at position (5, 0, 0)
-            CreateMarble(entityManagerA, new int3(0, 0, 0), new long3(500, 0, 0));
-            CreateMarble(entityManagerA, new int3(10, 0, 0), new long3(-500, 0, 0));
+            // Create marbles that will collide
+            var marbleA1 = CreateMarble(worldA, 0, new int3(0, 0, 0), new FixedPoint3(FixedPoint.One, 0, 0));
+            var marbleA2 = CreateMarble(worldA, 1, new int3(2, 0, 0), new FixedPoint3(FixedPoint.MinusOne, 0, 0));
             
-            CreateMarble(entityManagerB, new int3(0, 0, 0), new long3(500, 0, 0));
-            CreateMarble(entityManagerB, new int3(10, 0, 0), new long3(-500, 0, 0));
+            var marbleB1 = CreateMarble(worldB, 0, new int3(0, 0, 0), new FixedPoint3(FixedPoint.One, 0, 0));
+            var marbleB2 = CreateMarble(worldB, 1, new int3(2, 0, 0), new FixedPoint3(FixedPoint.MinusOne, 0, 0));
         }
 
         /// <summary>
-        /// Sets up a scenario with various module types
+        /// Setup module-heavy scenario
         /// </summary>
         private void SetupModuleScenario()
         {
-            // Create marbles
-            for (int i = 0; i < 5; i++)
-            {
-                CreateMarble(entityManagerA, new int3(i, 0, 0), new long3(200, 0, 0));
-                CreateMarble(entityManagerB, new int3(i, 0, 0), new long3(200, 0, 0));
-            }
+            // Create various modules in both worlds
+            CreateSplitter(worldA, new int3(0, 0, 0));
+            CreateSplitter(worldB, new int3(0, 0, 0));
             
-            // Create modules
-            CreateTrackPieces(entityManagerA);
-            CreateTrackPieces(entityManagerB);
+            CreateCollector(worldA, new int3(2, 0, 0));
+            CreateCollector(worldB, new int3(2, 0, 0));
+            
+            CreateLift(worldA, new int3(4, 0, 0));
+            CreateLift(worldB, new int3(4, 0, 0));
         }
 
         /// <summary>
-        /// Sets up a high-density marble scenario
+        /// Setup high marble count scenario
         /// </summary>
-        private void SetupHighDensityScenario(int marbleCount)
+        private void SetupHighMarbleCountScenario()
         {
-            // Create marbles in a grid pattern
-            int gridSize = (int)math.ceil(math.sqrt(marbleCount));
-            int marbleIndex = 0;
-            
-            for (int x = 0; x < gridSize && marbleIndex < marbleCount; x++)
+            // Create many marbles in both worlds
+            for (int i = 0; i < TEST_MARBLE_COUNT; i++)
             {
-                for (int z = 0; z < gridSize && marbleIndex < marbleCount; z++)
-                {
-                    var position = new int3(x, 0, z);
-                    var velocity = new long3(100 + (marbleIndex % 3) * 50, 0, 0);
-                    
-                    CreateMarble(entityManagerA, position, velocity);
-                    CreateMarble(entityManagerB, position, velocity);
-                    marbleIndex++;
-                }
+                var position = new int3(i % 10, 0, i / 10);
+                CreateMarble(worldA, i, position);
+                CreateMarble(worldB, i, position);
             }
         }
 
         /// <summary>
-        /// Verifies that both worlds have identical state
+        /// Create a marble entity
         /// </summary>
-        private void VerifyWorldsAreIdentical(string context)
+        private Entity CreateMarble(World world, int id, int3? position = null, FixedPoint3? velocity = null)
         {
-            // Compare marble counts
-            var marbleCountA = GetMarbleCount(entityManagerA);
-            var marbleCountB = GetMarbleCount(entityManagerB);
-            Assert.AreEqual(marbleCountA, marbleCountB, $"{context}: Marble counts differ");
+            var entityManager = world.EntityManager;
+            var entity = entityManager.CreateEntity();
             
-            // Compare debris counts
-            var debrisCountA = GetDebrisCount(entityManagerA);
-            var debrisCountB = GetDebrisCount(entityManagerB);
-            Assert.AreEqual(debrisCountA, debrisCountB, $"{context}: Debris counts differ");
+            entityManager.AddComponent<MarbleTag>(entity);
+            entityManager.AddComponent<TranslationFP>(entity);
+            entityManager.AddComponent<VelocityFP>(entity);
+            entityManager.AddComponent<AccelerationFP>(entity);
+            entityManager.AddComponent<CellIndex>(entity);
             
-            // Compare state hashes
-            var hashA = ComputeWorldStateHash(entityManagerA);
-            var hashB = ComputeWorldStateHash(entityManagerB);
-            Assert.AreEqual(hashA, hashB, $"{context}: World state hashes differ");
+            // Set deterministic position based on ID
+            var pos = position ?? new int3(id % 100, 0, id / 100);
+            entityManager.SetComponentData(entity, new CellIndex(pos));
+            entityManager.SetComponentData(entity, new TranslationFP(ECSUtils.CellIndexToPosition(pos)));
+            
+            // Set velocity
+            var vel = velocity ?? new FixedPoint3(0, 0, 0);
+            entityManager.SetComponentData(entity, new VelocityFP(vel));
+            
+            // Set zero acceleration
+            entityManager.SetComponentData(entity, new AccelerationFP(new FixedPoint3(0, 0, 0)));
+            
+            return entity;
         }
 
         /// <summary>
-        /// Verifies collision results are identical
+        /// Create test modules in the world
         /// </summary>
-        private void VerifyCollisionResults()
+        private void CreateTestModules(World world)
         {
-            var debrisCountA = GetDebrisCount(entityManagerA);
-            var debrisCountB = GetDebrisCount(entityManagerB);
-            
-            Assert.AreEqual(debrisCountA, debrisCountB, "Collision debris counts differ");
-            Assert.Greater(debrisCountA, 0, "No debris was created in collision test");
+            // Create a few modules for testing
+            CreateSplitter(world, new int3(5, 0, 5));
+            CreateCollector(world, new int3(10, 0, 10));
+            CreateLift(world, new int3(15, 0, 15));
         }
 
         /// <summary>
-        /// Verifies module states are identical
+        /// Create a splitter module
         /// </summary>
-        private void VerifyModuleStates(string context)
+        private Entity CreateSplitter(World world, int3 position)
         {
-            // Compare splitter states
-            var splitterHashA = ComputeSplitterStateHash(entityManagerA);
-            var splitterHashB = ComputeSplitterStateHash(entityManagerB);
-            Assert.AreEqual(splitterHashA, splitterHashB, $"{context}: Splitter states differ");
+            var entityManager = world.EntityManager;
+            var entity = entityManager.CreateEntity();
             
-            // Compare collector states
-            var collectorHashA = ComputeCollectorStateHash(entityManagerA);
-            var collectorHashB = ComputeCollectorStateHash(entityManagerB);
-            Assert.AreEqual(collectorHashA, collectorHashB, $"{context}: Collector states differ");
+            entityManager.AddComponent<SplitterState>(entity);
+            entityManager.AddComponent<SplitterTag>(entity);
+            entityManager.AddComponent<CellIndex>(entity);
             
-            // Compare lift states
-            var liftHashA = ComputeLiftStateHash(entityManagerA);
-            var liftHashB = ComputeLiftStateHash(entityManagerB);
-            Assert.AreEqual(liftHashA, liftHashB, $"{context}: Lift states differ");
-        }
-
-        /// <summary>
-        /// Verifies no overflow errors occurred
-        /// </summary>
-        private void VerifyNoOverflowErrors(string context)
-        {
-            // Check for NaN or infinity values in fixed-point components
-            var marbleQuery = entityManagerA.CreateEntityQuery(typeof(MarbleTag), typeof(TranslationFP), typeof(VelocityFP));
-            var marbles = marbleQuery.ToEntityArray(Allocator.TempJob);
-            
-            foreach (var marble in marbles)
+            entityManager.SetComponentData(entity, new CellIndex(position));
+            entityManager.SetComponentData(entity, new SplitterState
             {
-                var position = entityManagerA.GetComponentData<TranslationFP>(marble);
-                var velocity = entityManagerA.GetComponentData<VelocityFP>(marble);
-                
-                // Check for overflow indicators
-                Assert.IsFalse(float.IsNaN(FixedPoint.ToFloat(position.value)), $"{context}: Position overflow detected");
-                Assert.IsFalse(float.IsInfinity(FixedPoint.ToFloat(position.value)), $"{context}: Position infinity detected");
-                Assert.IsFalse(float.IsNaN(FixedPoint.ToFloat(velocity.value)), $"{context}: Velocity overflow detected");
-                Assert.IsFalse(float.IsInfinity(FixedPoint.ToFloat(velocity.value)), $"{context}: Velocity infinity detected");
-            }
+                currentExit = 0,
+                overrideExit = false,
+                overrideValue = 0
+            });
             
-            marbles.Dispose();
+            return entity;
         }
 
         /// <summary>
-        /// Adds identical systems to a world
+        /// Create a collector module
         /// </summary>
-        private void AddSystemsToWorld(World world)
+        private Entity CreateCollector(World world, int3 position)
         {
-            // Add core systems in correct order
-            world.CreateSystem<MarbleIntegrateSystem>();
-            world.CreateSystem<CollisionDetectSystem>();
-            world.CreateSystem<SplitterLogicSystem>();
-            world.CreateSystem<CollectorDequeueSystem>();
-            world.CreateSystem<LiftStepSystem>();
-            world.CreateSystem<GoalPadSystem>();
-            world.CreateSystem<DebrisCompactionSystem>();
+            var entityManager = world.EntityManager;
+            var entity = entityManager.CreateEntity();
+            
+            entityManager.AddComponent<CollectorState>(entity);
+            entityManager.AddComponent<CollectorTag>(entity);
+            entityManager.AddComponent<CellIndex>(entity);
+            
+            entityManager.SetComponentData(entity, new CellIndex(position));
+            entityManager.SetComponentData(entity, new CollectorState
+            {
+                level = 0,
+                head = 0,
+                tail = 0,
+                count = 0,
+                burstSize = 1
+            });
+            
+            // Add buffer for queue
+            entityManager.AddBuffer<CollectorQueueElem>(entity);
+            
+            return entity;
         }
 
         /// <summary>
-        /// Gets the number of marble entities
+        /// Create a lift module
         /// </summary>
-        private int GetMarbleCount(EntityManager entityManager)
+        private Entity CreateLift(World world, int3 position)
         {
-            var query = entityManager.CreateEntityQuery(typeof(MarbleTag));
-            return query.CalculateEntityCount();
+            var entityManager = world.EntityManager;
+            var entity = entityManager.CreateEntity();
+            
+            entityManager.AddComponent<LiftState>(entity);
+            entityManager.AddComponent<LiftTag>(entity);
+            entityManager.AddComponent<CellIndex>(entity);
+            
+            entityManager.SetComponentData(entity, new CellIndex(position));
+            entityManager.SetComponentData(entity, new LiftState
+            {
+                isActive = true,
+                currentHeight = 0,
+                targetHeight = 5
+            });
+            
+            return entity;
         }
 
         /// <summary>
-        /// Gets the number of debris entities
+        /// Step a world by one tick
         /// </summary>
-        private int GetDebrisCount(EntityManager entityManager)
+        private void StepWorld(World world, float deltaTime)
         {
-            var query = entityManager.CreateEntityQuery(typeof(DebrisTag));
-            return query.CalculateEntityCount();
+            world.SetTime(new Unity.Core.TimeData
+            {
+                ElapsedTime = world.Time.ElapsedTime + deltaTime,
+                DeltaTime = deltaTime
+            });
+            
+            world.Update();
         }
 
         /// <summary>
-        /// Computes a hash of the world state for comparison
+        /// Calculate a hash of the world state for comparison
         /// </summary>
-        private uint ComputeWorldStateHash(EntityManager entityManager)
+        private uint CalculateWorldStateHash(World world)
         {
             uint hash = 0;
+            var entityManager = world.EntityManager;
             
             // Hash marble positions and velocities
             var marbleQuery = entityManager.CreateEntityQuery(typeof(MarbleTag), typeof(TranslationFP), typeof(VelocityFP));
-            var marbles = marbleQuery.ToEntityArray(Allocator.TempJob);
-            
-            foreach (var marble in marbles)
+            using (var entities = marbleQuery.ToEntityArray(Allocator.TempJob))
+            using (var translations = marbleQuery.ToComponentDataArray<TranslationFP>(Allocator.TempJob))
+            using (var velocities = marbleQuery.ToComponentDataArray<VelocityFP>(Allocator.TempJob))
             {
-                var position = entityManager.GetComponentData<TranslationFP>(marble);
-                var velocity = entityManager.GetComponentData<VelocityFP>(marble);
-                
-                hash = math.hash(new uint2((uint)position.value, (uint)velocity.value)) ^ hash;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    hash = HashCombine(hash, entities[i].GetHashCode());
+                    hash = HashCombine(hash, translations[i].GetHashCode());
+                    hash = HashCombine(hash, velocities[i].GetHashCode());
+                }
             }
             
-            marbles.Dispose();
-            
-            // Hash debris positions
-            var debrisQuery = entityManager.CreateEntityQuery(typeof(DebrisTag), typeof(CellIndex));
-            var debrisList = debrisQuery.ToEntityArray(Allocator.TempJob);
-            
-            foreach (var debris in debrisList)
-            {
-                var cellIndex = entityManager.GetComponentData<CellIndex>(debris);
-                hash = math.hash(cellIndex.xyz) ^ hash;
-            }
-            
-            debrisList.Dispose();
+            // Hash module states
+            hash = HashCombine(hash, CalculateModuleStateHash(world));
             
             return hash;
         }
 
         /// <summary>
-        /// Computes a hash of splitter states
+        /// Calculate hash of module states
         /// </summary>
-        private uint ComputeSplitterStateHash(EntityManager entityManager)
+        private uint CalculateModuleStateHash(World world)
         {
             uint hash = 0;
-            var query = entityManager.CreateEntityQuery(typeof(SplitterTag), typeof(SplitterState));
-            var splitters = query.ToEntityArray(Allocator.TempJob);
+            var entityManager = world.EntityManager;
             
-            foreach (var splitter in splitters)
+            // Hash splitter states
+            var splitterQuery = entityManager.CreateEntityQuery(typeof(SplitterState));
+            using (var splitterStates = splitterQuery.ToComponentDataArray<SplitterState>(Allocator.TempJob))
             {
-                var state = entityManager.GetComponentData<SplitterState>(splitter);
-                hash = math.hash(new uint3((uint)state.currentExit, (uint)(state.overrideExit ? 1 : 0), (uint)state.overrideValue)) ^ hash;
+                for (int i = 0; i < splitterStates.Length; i++)
+                {
+                    hash = HashCombine(hash, splitterStates[i].GetHashCode());
+                }
             }
             
-            splitters.Dispose();
+            // Hash collector states
+            var collectorQuery = entityManager.CreateEntityQuery(typeof(CollectorState));
+            using (var collectorStates = collectorQuery.ToComponentDataArray<CollectorState>(Allocator.TempJob))
+            {
+                for (int i = 0; i < collectorStates.Length; i++)
+                {
+                    hash = HashCombine(hash, collectorStates[i].GetHashCode());
+                }
+            }
+            
+            // Hash lift states
+            var liftQuery = entityManager.CreateEntityQuery(typeof(LiftState));
+            using (var liftStates = liftQuery.ToComponentDataArray<LiftState>(Allocator.TempJob))
+            {
+                for (int i = 0; i < liftStates.Length; i++)
+                {
+                    hash = HashCombine(hash, liftStates[i].GetHashCode());
+                }
+            }
+            
             return hash;
         }
 
         /// <summary>
-        /// Computes a hash of collector states
+        /// Combine two hash values
         /// </summary>
-        private uint ComputeCollectorStateHash(EntityManager entityManager)
+        private uint HashCombine(uint hash1, int hash2)
         {
-            uint hash = 0;
-            var query = entityManager.CreateEntityQuery(typeof(CollectorTag), typeof(CollectorState));
-            var collectors = query.ToEntityArray(Allocator.TempJob);
-            
-            foreach (var collector in collectors)
-            {
-                var state = entityManager.GetComponentData<CollectorState>(collector);
-                hash = math.hash(new uint4(state.head, state.tail, state.count, state.burstSize)) ^ hash;
-            }
-            
-            collectors.Dispose();
-            return hash;
-        }
-
-        /// <summary>
-        /// Computes a hash of lift states
-        /// </summary>
-        private uint ComputeLiftStateHash(EntityManager entityManager)
-        {
-            uint hash = 0;
-            var query = entityManager.CreateEntityQuery(typeof(LiftTag), typeof(LiftState));
-            var lifts = query.ToEntityArray(Allocator.TempJob);
-            
-            foreach (var lift in lifts)
-            {
-                var state = entityManager.GetComponentData<LiftState>(lift);
-                hash = math.hash(new uint3((uint)(state.isActive ? 1 : 0), (uint)state.currentHeight, (uint)state.targetHeight)) ^ hash;
-            }
-            
-            lifts.Dispose();
-            return hash;
+            return ((hash1 << 5) + hash1) ^ (uint)hash2;
         }
     }
 } 

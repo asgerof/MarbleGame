@@ -148,9 +148,12 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private void ReleaseMarble(EntityCommandBuffer ecb, Entity marble)
         {
+            // Calculate output position (1 cell forward from collector in positive X direction)
+            var outputCellIndex = new int3(1, 0, 0); // Standard output position relative to collector
+            var outputPosition = ECSUtils.CellIndexToPosition(outputCellIndex);
+            
             // Move the existing marble to the output position instead of destroying/creating
-            var outputPosition = ECSUtils.CellIndexToPosition(new int3(0, 0, 0)); // TODO: Get actual output position
-            ecb.SetComponent(marble, outputPosition);
+            ecb.SetComponent(marble, new TranslationFP(outputPosition));
             
             // Reset velocity to zero (marbles start stationary when released)
             ecb.SetComponent(marble, VelocityFP.Zero);
@@ -159,7 +162,7 @@ namespace MarbleMaker.Core.ECS
             ecb.SetComponent(marble, AccelerationFP.Zero);
             
             // Update cell index to output position
-            ecb.SetComponent(marble, new CellIndex(0, 0, 0)); // TODO: Get actual output cell
+            ecb.SetComponent(marble, new CellIndex(outputCellIndex));
             
             // The marble already has MarbleTag, no need to add it again
             // This approach reuses the existing entity instead of creating/destroying

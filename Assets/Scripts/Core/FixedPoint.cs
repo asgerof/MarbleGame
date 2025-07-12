@@ -44,7 +44,7 @@ namespace MarbleMaker.Core
         public static FixedPoint operator *(FixedPoint a, FixedPoint b) => new FixedPoint((a.value * b.value) >> FRACTION_BITS);
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static FixedPoint operator /(FixedPoint a, FixedPoint b) => new FixedPoint((a.value << FRACTION_BITS) / b.value);
+        public static FixedPoint operator /(FixedPoint a, FixedPoint b) => new FixedPoint((long)(((ulong)a.value << FRACTION_BITS) / (ulong)b.value));
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static FixedPoint operator -(FixedPoint a) => new FixedPoint(-a.value);

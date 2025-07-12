@@ -414,19 +414,6 @@ namespace MarbleMaker.Core.ECS
             break;
         }
     }
-    
-    /// <summary>
-    /// Extension methods for fast clearing NativeList collections
-    /// </summary>
-    public static class NativeListExtensions
-    {
-        /// <summary>
-        /// Fast clears a NativeList by only setting Length to 0, keeping capacity
-        /// </summary>
-        public static void FastClear<T>(this NativeList<T> list) where T : unmanaged
-        {
-            list.Length = 0;  // keeps capacity
-        }
-    }
+
 }
 }

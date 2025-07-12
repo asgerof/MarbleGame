@@ -23,6 +23,8 @@ namespace MarbleMaker.Core.ECS
         private NativeList<Entity> marblesToDestroy;
         private NativeList<int3> debrisToSpawn;
         private NativeList<ulong> uniqueKeys;
+        private NativeHashSet<ulong> processedKeys; // Persistent to avoid per-frame allocation
+        private NativeList<CollisionPair> collisionPairs; // For parallel collision processing
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -39,6 +41,8 @@ namespace MarbleMaker.Core.ECS
             marblesToDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
             debrisToSpawn = new NativeList<int3>(1000, Allocator.Persistent);
             uniqueKeys = new NativeList<ulong>(1000, Allocator.Persistent);
+            processedKeys = new NativeHashSet<ulong>(1000, Allocator.Persistent);
+            collisionPairs = new NativeList<CollisionPair>(1000, Allocator.Persistent);
         }
 
         [BurstCompile]
@@ -50,6 +54,8 @@ namespace MarbleMaker.Core.ECS
             if (marblesToDestroy.IsCreated) marblesToDestroy.Dispose();
             if (debrisToSpawn.IsCreated) debrisToSpawn.Dispose();
             if (uniqueKeys.IsCreated) uniqueKeys.Dispose();
+            if (processedKeys.IsCreated) processedKeys.Dispose();
+            if (collisionPairs.IsCreated) collisionPairs.Dispose();
         }
 
         [BurstCompile]
@@ -61,6 +67,8 @@ namespace MarbleMaker.Core.ECS
             marblesToDestroy.FastClear();
             debrisToSpawn.FastClear();
             uniqueKeys.FastClear();
+            processedKeys.Clear();
+            collisionPairs.FastClear();
 
             // Get current tick for deterministic ordering
             var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
@@ -80,16 +88,26 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = populateMarbleHashJob.ScheduleParallel(state.Dependency);
 
-            // Step 3: Detect collisions using persistent uniqueKeys list to avoid GetKeyArray() allocation
-            var detectCollisionsJob = new DetectCollisionsJob
+            // Step 3: Generate collision pairs for parallel processing
+            var generatePairsJob = new GenerateCollisionPairsJob
             {
                 cellHash = cellHash,
                 debrisCells = debrisCells,
-                marblesToDestroy = marblesToDestroy,
-                debrisToSpawn = debrisToSpawn,
-                uniqueKeys = uniqueKeys
+                uniqueKeys = uniqueKeys,
+                processedKeys = processedKeys,
+                collisionPairs = collisionPairs
             };
-            state.Dependency = detectCollisionsJob.Schedule(state.Dependency);
+            state.Dependency = generatePairsJob.Schedule(state.Dependency);
+
+            // Step 4: Process collision pairs in parallel
+            var processCollisionPairsJob = new ProcessCollisionPairsJob
+            {
+                collisionPairs = collisionPairs.AsArray(),
+                marblesToDestroy = marblesToDestroy.AsParallelWriter(),
+                debrisToSpawn = debrisToSpawn.AsParallelWriter()
+            };
+            // Use batch size of 32 for good parallel performance
+            state.Dependency = processCollisionPairsJob.ScheduleParallel(collisionPairs.Length, 32, state.Dependency);
 
             // Apply collision results
             state.Dependency.Complete();
@@ -153,25 +171,42 @@ namespace MarbleMaker.Core.ECS
         }
     }
 
+
+
     /// <summary>
-    /// Job to detect collisions using cell hash
-    /// From GDD: "When two marbles try to occupy the same cell on any tick, both destruct"
+    /// Represents a collision pair for parallel processing
+    /// </summary>
+    public struct CollisionPair
+    {
+        public ulong cellKey;
+        public NativeArray<MarbleHandle> marbles;
+        public bool hasDebris;
+        
+        public CollisionPair(ulong cellKey, NativeArray<MarbleHandle> marbles, bool hasDebris)
+        {
+            this.cellKey = cellKey;
+            this.marbles = marbles;
+            this.hasDebris = hasDebris;
+        }
+    }
+
+    /// <summary>
+    /// Job to generate collision pairs for parallel processing
     /// </summary>
     [BurstCompile]
-    public struct DetectCollisionsJob : IJob
+    public struct GenerateCollisionPairsJob : IJob
     {
         [ReadOnly] public NativeMultiHashMap<ulong, MarbleHandle> cellHash;
         [ReadOnly] public NativeHashSet<ulong> debrisCells;
-        public NativeList<Entity> marblesToDestroy;
-        public NativeList<int3> debrisToSpawn;
-        public NativeList<ulong> uniqueKeys;
+        [ReadOnly] public NativeList<ulong> uniqueKeys;
+        public NativeHashSet<ulong> processedKeys;
+        public NativeList<CollisionPair> collisionPairs;
 
         public void Execute()
         {
-            // Check each unique cell for collisions
-            cellHash.GetKeyArray(uniqueKeys);
-            var processedKeys = new NativeHashSet<ulong>(uniqueKeys.Length, Allocator.Temp);
-
+            // Ensure capacity for this frame
+            processedKeys.EnsureCapacity(uniqueKeys.Length);
+            
             for (int i = 0; i < uniqueKeys.Length; i++)
             {
                 var key = uniqueKeys[i];
@@ -180,49 +215,68 @@ namespace MarbleMaker.Core.ECS
 
                 processedKeys.Add(key);
 
-                // Check if cell has debris - marbles hitting debris are destroyed
-                if (debrisCells.Contains(key))
+                // Get all marbles at this cell
+                var marbleList = new NativeList<MarbleHandle>(8, Allocator.Temp);
+                var iterator = cellHash.GetValuesForKey(key);
+                while (iterator.MoveNext())
                 {
-                    // Destroy all marbles in this cell
-                    var iterator = cellHash.GetValuesForKey(key);
-                    while (iterator.MoveNext())
-                    {
-                        var marbleHandle = iterator.Current;
-                        marblesToDestroy.Add(marbleHandle.MarbleEntity);
-                    }
+                    marbleList.Add(iterator.Current);
                 }
-                else
+
+                // Check if this cell has debris
+                bool hasDebris = debrisCells.Contains(key);
+
+                // Create collision pair if there are marbles and either debris or multiple marbles
+                if (marbleList.Length > 0 && (hasDebris || marbleList.Length >= 2))
                 {
-                    // Check for marble-to-marble collisions
-                    var marbleHandles = new NativeList<MarbleHandle>(8, Allocator.Temp);
-                    var iterator = cellHash.GetValuesForKey(key);
-                    while (iterator.MoveNext())
-                    {
-                        marbleHandles.Add(iterator.Current);
-                    }
-
-                    // If 2 or more marbles in same cell, collision occurred
-                    if (marbleHandles.Length >= 2)
-                    {
-                        // Destroy all marbles in collision
-                        for (int j = 0; j < marbleHandles.Length; j++)
-                        {
-                            var marbleHandle = marbleHandles[j];
-                            marblesToDestroy.Add(marbleHandle.MarbleEntity);
-                        }
-
-                        // Spawn debris at collision location
-                        var cellPos = ECSUtils.UnpackCellKey(key);
-                        debrisToSpawn.Add(cellPos);
-                    }
-
-                    marbleHandles.Dispose();
+                    var marblesArray = marbleList.AsArray();
+                    var collisionPair = new CollisionPair(key, marblesArray, hasDebris);
+                    collisionPairs.Add(collisionPair);
                 }
+
+                marbleList.Dispose();
             }
-
-            processedKeys.Dispose();
         }
     }
-    
+
+    /// <summary>
+    /// Parallel job to process collision pairs
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessCollisionPairsJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<CollisionPair> collisionPairs;
+        [WriteOnly] public NativeList<Entity>.ParallelWriter marblesToDestroy;
+        [WriteOnly] public NativeList<int3>.ParallelWriter debrisToSpawn;
+
+        public void Execute(int index)
+        {
+            var collisionPair = collisionPairs[index];
+            
+            if (collisionPair.hasDebris)
+            {
+                // Marbles hitting debris are destroyed
+                for (int i = 0; i < collisionPair.marbles.Length; i++)
+                {
+                    var marbleHandle = collisionPair.marbles[i];
+                    marblesToDestroy.AddNoResize(marbleHandle.MarbleEntity);
+                }
+            }
+            else if (collisionPair.marbles.Length >= 2)
+            {
+                // Marble-to-marble collision
+                // Destroy all marbles in collision
+                for (int i = 0; i < collisionPair.marbles.Length; i++)
+                {
+                    var marbleHandle = collisionPair.marbles[i];
+                    marblesToDestroy.AddNoResize(marbleHandle.MarbleEntity);
+                }
+
+                // Spawn debris at collision location
+                var cellPos = ECSUtils.UnpackCellKey(collisionPair.cellKey);
+                debrisToSpawn.AddNoResize(cellPos);
+            }
+        }
+    }
 
 }
