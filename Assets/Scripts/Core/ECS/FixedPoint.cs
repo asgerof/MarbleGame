@@ -66,8 +66,14 @@ namespace MarbleMaker.Core.ECS
 #if UNITY_2024_1_OR_NEWER           // Int128 path
             // (a << 32) / b  — do the shift first!
             return (long)(((Int128)a << FRACTIONAL_BITS) / b);
-#else                               // fallback for older Unity
-            return (long)(((ulong)a << FRACTIONAL_BITS) / (ulong)b);
+#else                               // fallback for older Unity with proper signed handling
+            bool neg = (a ^ b) < 0;
+            ulong una = (ulong)math.abs(a);
+            ulong unb = (ulong)math.abs(b);
+            
+            ulong raw = (una << FRACTIONAL_BITS) / unb;
+            long result = (long)raw;
+            return neg ? -result : result;
 #endif
         }
         

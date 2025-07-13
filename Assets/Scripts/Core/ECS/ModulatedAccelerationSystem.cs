@@ -73,21 +73,24 @@ namespace MarbleMaker.Core.ECS
         [ReadOnly] public ComponentLookup<ModuleRef> moduleRefLookup;
         [ReadOnly] public ComponentLookup<ConnectorRef> connectorRefLookup;
 
-        public void Execute(ref AccelerationFP acceleration, in CellIndex cellIndex, in TranslationFP translation)
+        public void Execute(ref AccelerationComponent acceleration, in CellIndex cellIndex, in PositionComponent position)
         {
             // Calculate acceleration based on the current cell's module/connector
-            long totalAccel = CalculateAcceleration(cellIndex.xyz);
-            acceleration.value = totalAccel;
+            acceleration.Value = CalculateAcceleration(cellIndex.xyz);
         }
 
         /// <summary>
         /// Calculates acceleration based on the module/connector in the current cell
         /// </summary>
         [BurstCompile]
-        private long CalculateAcceleration(int3 cellPos)
+        private Fixed32x3 CalculateAcceleration(int3 cellPos)
         {
             // Start with base physics (gravity + friction)
-            long totalAccel = baseGravityAccel + baseFrictionAccel;
+            var totalAccel = new Fixed32x3(
+                baseFrictionAccel,
+                baseGravityAccel,
+                baseFrictionAccel
+            );
             
             // TODO: In a full implementation, this would:
             // 1. Create an entity query for modules/connectors at cellPos

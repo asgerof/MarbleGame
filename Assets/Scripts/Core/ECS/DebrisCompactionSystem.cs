@@ -20,7 +20,14 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // Initialize collections for compaction
-            if (!entitiesToRemove.IsCreated) entitiesToRemove = new NativeList<Entity>(1000, Allocator.Persistent);
+            int initialCapacity = 1024;
+            int expectedPeak = 10000; // from design doc
+            
+            if (!entitiesToRemove.IsCreated) 
+            {
+                entitiesToRemove = new NativeList<Entity>(initialCapacity, Allocator.Persistent);
+                entitiesToRemove.Capacity = math.max(entitiesToRemove.Capacity, expectedPeak);
+            }
         }
 
         [BurstCompile]

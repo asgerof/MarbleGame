@@ -28,9 +28,24 @@ namespace MarbleMaker.Core.ECS
             state.RequireForUpdate<LiftState>();
             
             // Initialize collections for marble movement
-            if (!marblesToMove.IsCreated) marblesToMove = new NativeList<Entity>(1000, Allocator.Persistent);
-            if (!targetPositions.IsCreated) targetPositions = new NativeList<int3>(1000, Allocator.Persistent);
-            if (!targetVelocities.IsCreated) targetVelocities = new NativeList<VelocityFP>(1000, Allocator.Persistent);
+            int initialCapacity = 1024;
+            int expectedPeak = 10000; // from design doc
+            
+            if (!marblesToMove.IsCreated) 
+            {
+                marblesToMove = new NativeList<Entity>(initialCapacity, Allocator.Persistent);
+                marblesToMove.Capacity = math.max(marblesToMove.Capacity, expectedPeak);
+            }
+            if (!targetPositions.IsCreated) 
+            {
+                targetPositions = new NativeList<int3>(initialCapacity, Allocator.Persistent);
+                targetPositions.Capacity = math.max(targetPositions.Capacity, expectedPeak);
+            }
+            if (!targetVelocities.IsCreated) 
+            {
+                targetVelocities = new NativeList<VelocityFP>(initialCapacity, Allocator.Persistent);
+                targetVelocities.Capacity = math.max(targetVelocities.Capacity, expectedPeak);
+            }
         }
 
         [BurstCompile]

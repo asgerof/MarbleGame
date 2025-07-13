@@ -209,36 +209,57 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void AddSystemsToGroups()
         {
+            // Get the system groups
+            var inputActionGroup = playSimWorld.GetOrCreateSystemManaged<InputActionGroup>();
+            var motionGroup = playSimWorld.GetOrCreateSystemManaged<MotionGroup>();
+            var moduleLogicGroup = playSimWorld.GetOrCreateSystemManaged<ModuleLogicGroup>();
+            
             // InputActionGroup systems (applies queued click/tap events)
-            playSimWorld.CreateSystem<InteractApplySystem>();
-            playSimWorld.CreateSystem<SeedSpawnerSystem>();
+            var interactApplySystem = playSimWorld.CreateSystem<InteractApplySystem>();
+            var seedSpawnerSystem = playSimWorld.CreateSystem<SeedSpawnerSystem>();
+            inputActionGroup.AddSystemToUpdateList(interactApplySystem);
+            inputActionGroup.AddSystemToUpdateList(seedSpawnerSystem);
             
             // MotionGroup systems (pure data jobs - marble integration, collision)
-            playSimWorld.CreateSystem<MarbleIntegrateSystem>();
-            playSimWorld.CreateSystem<CollisionDetectSystem>();
-            playSimWorld.CreateSystem<DebrisCompactionSystem>();
+            var marbleIntegrateSystem = playSimWorld.CreateSystem<MarbleIntegrateSystem>();
+            var collisionDetectSystem = playSimWorld.CreateSystem<CollisionDetectSystem>();
+            var debrisCompactionSystem = playSimWorld.CreateSystem<DebrisCompactionSystem>();
+            motionGroup.AddSystemToUpdateList(marbleIntegrateSystem);
+            motionGroup.AddSystemToUpdateList(collisionDetectSystem);
+            motionGroup.AddSystemToUpdateList(debrisCompactionSystem);
             
             // ModuleLogicGroup systems (state machines for splitters, collectors, cannons, lifts)
             // Goal systems (run first)
-            playSimWorld.CreateSystem<GoalPadInitializationSystem>();
-            playSimWorld.CreateSystem<GoalDetectionSystem>();
-            playSimWorld.CreateSystem<GoalPadSystem>();
+            var goalPadInitializationSystem = playSimWorld.CreateSystem<GoalPadInitializationSystem>();
+            var goalDetectionSystem = playSimWorld.CreateSystem<GoalDetectionSystem>();
+            var goalPadSystem = playSimWorld.CreateSystem<GoalPadSystem>();
+            moduleLogicGroup.AddSystemToUpdateList(goalPadInitializationSystem);
+            moduleLogicGroup.AddSystemToUpdateList(goalDetectionSystem);
+            moduleLogicGroup.AddSystemToUpdateList(goalPadSystem);
             
             // Lift systems
-            playSimWorld.CreateSystem<LiftInitializationSystem>();
-            playSimWorld.CreateSystem<LiftLoadingSystem>();
-            playSimWorld.CreateSystem<LiftStepSystem>();
+            var liftInitializationSystem = playSimWorld.CreateSystem<LiftInitializationSystem>();
+            var liftLoadingSystem = playSimWorld.CreateSystem<LiftLoadingSystem>();
+            var liftStepSystem = playSimWorld.CreateSystem<LiftStepSystem>();
+            moduleLogicGroup.AddSystemToUpdateList(liftInitializationSystem);
+            moduleLogicGroup.AddSystemToUpdateList(liftLoadingSystem);
+            moduleLogicGroup.AddSystemToUpdateList(liftStepSystem);
             
             // Splitter systems
-            playSimWorld.CreateSystem<SplitterInputDetectionSystem>();
-            playSimWorld.CreateSystem<SplitterLogicSystem>();
+            var splitterInputDetectionSystem = playSimWorld.CreateSystem<SplitterInputDetectionSystem>();
+            var splitterLogicSystem = playSimWorld.CreateSystem<SplitterLogicSystem>();
+            moduleLogicGroup.AddSystemToUpdateList(splitterInputDetectionSystem);
+            moduleLogicGroup.AddSystemToUpdateList(splitterLogicSystem);
             
             // Collector systems
-            playSimWorld.CreateSystem<CollectorEnqueueSystem>();
-            playSimWorld.CreateSystem<CollectorDequeueSystem>();
+            var collectorEnqueueSystem = playSimWorld.CreateSystem<CollectorEnqueueSystem>();
+            var collectorDequeueSystem = playSimWorld.CreateSystem<CollectorDequeueSystem>();
+            moduleLogicGroup.AddSystemToUpdateList(collectorEnqueueSystem);
+            moduleLogicGroup.AddSystemToUpdateList(collectorDequeueSystem);
             
             // Runtime spawning system (runs last)
-            playSimWorld.CreateSystem<RuntimeMarbleSpawnerSystem>();
+            var runtimeMarbleSpawnerSystem = playSimWorld.CreateSystem<RuntimeMarbleSpawnerSystem>();
+            moduleLogicGroup.AddSystemToUpdateList(runtimeMarbleSpawnerSystem);
         }
         
         /// <summary>

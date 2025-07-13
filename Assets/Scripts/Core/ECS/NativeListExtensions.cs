@@ -1,5 +1,6 @@
 using Unity.Collections;
 using Unity.Burst;
+using Unity.Assertions;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -16,7 +17,10 @@ namespace MarbleMaker.Core.ECS
         public static void FastClear<T>(this NativeList<T> list)
             where T : unmanaged
         {
+#if UNITY_EDITOR
+            Assert.AreEqual(Allocator.Persistent, list.Allocator);
+#endif
             list.Length = 0;          // keeps capacity
         }
     }
-} 
+}

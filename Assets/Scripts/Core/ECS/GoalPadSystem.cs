@@ -27,9 +27,24 @@ namespace MarbleMaker.Core.ECS
             state.RequireForUpdate<GoalPad>();
             
             // Initialize collections for marble collection
-            if (!marblesToDestroy.IsCreated) marblesToDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
-            if (!coinRewards.IsCreated) coinRewards = new NativeList<int>(1000, Allocator.Persistent);
-            if (!goalPadsToUpdate.IsCreated) goalPadsToUpdate = new NativeList<Entity>(100, Allocator.Persistent);
+            int initialCapacity = 1024;
+            int expectedPeak = 10000; // from design doc
+            
+            if (!marblesToDestroy.IsCreated) 
+            {
+                marblesToDestroy = new NativeList<Entity>(initialCapacity, Allocator.Persistent);
+                marblesToDestroy.Capacity = math.max(marblesToDestroy.Capacity, expectedPeak);
+            }
+            if (!coinRewards.IsCreated) 
+            {
+                coinRewards = new NativeList<int>(initialCapacity, Allocator.Persistent);
+                coinRewards.Capacity = math.max(coinRewards.Capacity, expectedPeak);
+            }
+            if (!goalPadsToUpdate.IsCreated) 
+            {
+                goalPadsToUpdate = new NativeList<Entity>(100, Allocator.Persistent);
+                goalPadsToUpdate.Capacity = math.max(goalPadsToUpdate.Capacity, 500);
+            }
         }
 
         [BurstCompile]

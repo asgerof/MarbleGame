@@ -12,6 +12,9 @@ public class PlaySimWorldBootstrap : ICustomBootstrap
         World.DefaultGameObjectInjectionWorld = world;
 
         world.GetOrCreateSystemManaged<EndSimulationEcbSystem>();
+        
+        // Finalize world initialization
+        world.GetOrCreateSystemManaged<SimulationSystemGroup>();
 
         ScriptBehaviourUpdateOrder.AddWorldToCurrentPlayerLoop(world);
         return true;

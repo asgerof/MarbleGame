@@ -47,9 +47,9 @@ namespace MarbleMaker.Core.ECS
                 SystemAPI.Query<RefRW<CollectorState>, DynamicBuffer<CollectorQueueElem>>()
                 .WithEntityAccess())
             {
-                // Calculate queue count using head and tail
-                int queueCount = (collectorState.ValueRO.Tail - collectorState.ValueRO.Head);
-                if (queueCount > 0)
+                            // Calculate queue count using head and tail
+            uint queueCount = (collectorState.ValueRO.Tail - collectorState.ValueRO.Head) & collectorState.ValueRO.CapacityMask;
+            if (queueCount > 0)
                 {
                     ProcessCollectorDequeue(ref collectorState.ValueRW, queueBuffer, ecb, _marbleArchetype);
                 }
@@ -93,19 +93,19 @@ namespace MarbleMaker.Core.ECS
             uint MASK = state.CapacityMask; // Use the stored mask
 
             // Calculate current queue count
-            int queueCount = (state.Tail - state.Head) & (int)MASK;
+            uint queueCount = (state.Tail - state.Head) & MASK;
             
             // Basic dequeue logic - release one marble per frame
             if (queueCount > 0)
             {
-                var queueIndex = state.Head & (int)MASK;
+                var queueIndex = (int)(state.Head & MASK);
                 if (queueIndex < queue.Length)
                 {
                     var queueElem = queue[queueIndex];
                     ReleaseMarble(ecb, queueElem.marble);
                     
                     // Update circular buffer head
-                    state.Head = (state.Head + 1) & (int)MASK;
+                    state.Head = (state.Head + 1) & MASK;
                 }
             }
         }
@@ -209,7 +209,7 @@ namespace MarbleMaker.Core.ECS
             queue.Add(queueElem);
             
             // Update state using proper capacity mask
-            state.Tail = (state.Tail + 1) & (int)state.CapacityMask;
+            state.Tail = (state.Tail + 1) & state.CapacityMask;
         }
     }
 }

@@ -9,9 +9,9 @@ namespace MarbleMaker.Core.ECS
     /// Fixed-point position component (Q32.32 fixed-point)
     /// From ECS docs: "TranslationFP, VelocityFP, AccelerationFP, CellIndex, MarbleTag (32 B aligned)"
     /// </summary>
-    public struct TranslationComponent : IComponentData
+    public struct PositionComponent : IComponentData
     {
-        public Fixed32 Value;
+        public Fixed32x3 Value;
     }
 
     /// <summary>
@@ -19,7 +19,7 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public struct VelocityComponent : IComponentData
     {
-        public Fixed32 Value;
+        public Fixed32x3 Value;
     }
 
     /// <summary>
@@ -27,7 +27,7 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public struct AccelerationComponent : IComponentData
     {
-        public Fixed32 Value;
+        public Fixed32x3 Value;
     }
 
     /// <summary>
@@ -103,8 +103,8 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public struct CollectorState : IComponentData
     {
-        public int  Head;   // dequeue ptr
-        public int  Tail;   // enqueue ptr
+        public uint Head;   // dequeue ptr
+        public uint Tail;   // enqueue ptr
         public uint CapacityMask; // (capacity-1) – MUST be power of two
     }
 
@@ -296,25 +296,26 @@ namespace MarbleMaker.Core.ECS
         /// Converts fixed-point position to cell index
         /// </summary>
         [BurstCompile]
-        public static int3 PositionToCellIndex(Fixed32 position)
+        public static int3 PositionToCellIndex(in Fixed32x3 pos, long cellSizeFP)
         {
-            // Convert from Q32.32 fixed-point to grid cell using pure integer math
-            int cellCoord = (int)position;
             return new int3(
-                cellCoord,
-                cellCoord, 
-                cellCoord
-            );
+                (int)(pos.x / cellSizeFP),
+                (int)(pos.y / cellSizeFP),
+                (int)(pos.z / cellSizeFP));
         }
 
         /// <summary>
         /// Converts cell index to fixed-point center position
         /// </summary>
         [BurstCompile]
-        public static Fixed32 CellIndexToPosition(int3 cellIndex)
+        public static Fixed32x3 CellIndexToPosition(int3 cellIndex)
         {
             // Convert grid cell to world position (center of cell)
-            return Fixed32.FromFloat(cellIndex.x) + Fixed32.HALF;
+            return new Fixed32x3(
+                Fixed32.FromFloat(cellIndex.x).Raw + Fixed32.HALF.Raw,
+                Fixed32.FromFloat(cellIndex.y).Raw + Fixed32.HALF.Raw,
+                Fixed32.FromFloat(cellIndex.z).Raw + Fixed32.HALF.Raw
+            );
         }
     }
 }
