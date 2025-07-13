@@ -86,14 +86,7 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void InitializeMarbleArchetype(ref SystemState state)
         {
-            var entityManager = state.EntityManager;
-            marbleArchetype = entityManager.CreateArchetype(
-                typeof(TranslationFP),
-                typeof(VelocityFP),
-                typeof(AccelerationFP),
-                typeof(CellIndex),
-                typeof(MarbleTag)
-            );
+            marbleArchetype = Archetypes.Marble;
         }
 
         /// <summary>

@@ -13,6 +13,10 @@ public class PlaySimWorldBootstrap : ICustomBootstrap
 
         world.GetOrCreateSystemManaged<EndSimulationEcbSystem>();
         
+        // Initialize shared archetypes
+        var entityManager = world.EntityManager;
+        Archetypes.Initialize(entityManager);
+        
         // Finalize world initialization
         world.GetOrCreateSystemManaged<SimulationSystemGroup>();
 

@@ -61,14 +61,20 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void InitializeMarbleArchetype(ref SystemState state)
         {
-            var entityManager = state.EntityManager;
-            _marbleArchetype = entityManager.CreateArchetype(
-                typeof(TranslationFP),
-                typeof(VelocityFP),
-                typeof(AccelerationFP),
-                typeof(CellIndex),
-                typeof(MarbleTag)
-            );
+            _marbleArchetype = Archetypes.Marble;
+        }
+
+        /// <summary>
+        /// Ensures the buffer has sufficient capacity using exponential growth
+        /// </summary>
+        [BurstCompile]
+        private static void EnsureCapacity(DynamicBuffer<CollectorQueueElem> queue, int required)
+        {
+            if (required <= queue.Capacity) return;
+            int newCapacity = math.max(queue.Capacity * 2, required);
+            // Ensure power-of-two for efficient masking
+            newCapacity = MathUtils.NextPowerOfTwo(newCapacity);
+            queue.Capacity = newCapacity;
         }
 
         /// <summary>
@@ -79,16 +85,13 @@ namespace MarbleMaker.Core.ECS
         private void ProcessCollectorDequeue(ref CollectorState state, DynamicBuffer<CollectorQueueElem> queue, 
             EntityCommandBuffer ecb, EntityArchetype marbleArchetype)
         {
-            // Ensure power-of-two capacity for efficient masking
-            int capacity = MathUtils.NextPowerOfTwo(math.max(queue.Capacity, 16));
-            if (queue.Capacity < capacity)
-            {
-                queue.Capacity = capacity;
-            }
-            
             // Initialize CapacityMask if this is the first time
             if (state.CapacityMask == 0)
-                state.CapacityMask = (uint)(capacity - 1);
+            {
+                // Ensure minimum capacity and set up mask
+                EnsureCapacity(queue, 16);
+                state.CapacityMask = (uint)(queue.Capacity - 1);
+            }
             
             uint MASK = state.CapacityMask; // Use the stored mask
 
@@ -144,6 +147,7 @@ namespace MarbleMaker.Core.ECS
     /// System for enqueuing marbles into collectors
     /// This runs before the dequeue system to handle incoming marbles
     /// </summary>
+    [DisableAutoCreation]
     [UpdateInGroup(typeof(ModuleLogicGroup))]
     [UpdateBefore(typeof(CollectorDequeueSystem))]
     [BurstCompile]
@@ -160,7 +164,7 @@ namespace MarbleMaker.Core.ECS
         public void OnUpdate(ref SystemState state)
         {
             // Get current tick for deterministic ordering
-            var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
+            var currentTick = (long)SimulationTick.Current;
 
             // Process marble enqueue requests
             // This would be called when marbles reach collector input positions
@@ -197,7 +201,25 @@ namespace MarbleMaker.Core.ECS
         {
             // Initialize CapacityMask if this is the first time
             if (state.CapacityMask == 0)
-                state.CapacityMask = (uint)(queue.Length - 1);
+            {
+                EnsureCapacity(queue, 16);
+                state.CapacityMask = (uint)(queue.Capacity - 1);
+            }
+            
+            // Check for queue overflow before adding
+            uint head = state.Head;
+            uint nextTail = (state.Tail + 1) & state.CapacityMask;
+            if (nextTail == head)
+            {
+                // Queue is full, expand capacity
+                EnsureCapacity(queue, queue.Capacity * 2);
+                state.CapacityMask = (uint)(queue.Capacity - 1);
+                // Recalculate nextTail with new mask
+                nextTail = (state.Tail + 1) & state.CapacityMask;
+            }
+            
+            // Ensure capacity before adding
+            EnsureCapacity(queue, queue.Length + 1);
             
             // Add marble to queue
             var queueElem = new CollectorQueueElem
@@ -209,7 +231,7 @@ namespace MarbleMaker.Core.ECS
             queue.Add(queueElem);
             
             // Update state using proper capacity mask
-            state.Tail = (state.Tail + 1) & state.CapacityMask;
+            state.Tail = nextTail;
         }
     }
 }

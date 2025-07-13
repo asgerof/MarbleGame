@@ -99,6 +99,9 @@ namespace MarbleMaker.Core.ECS
                 currentTick = 0;
                 accumulatedTime = 0f;
                 
+                // Reset deterministic tick counter
+                SimulationTick.Reset();
+                
                 if (enableDebugLogging)
                     Debug.Log("PlaySimWorldManager: Simulation started");
             }
@@ -120,6 +123,9 @@ namespace MarbleMaker.Core.ECS
                 playSimWorld.Dispose();
                 playSimWorld = null;
             }
+            
+            // Reset shared archetypes
+            Archetypes.Reset();
             
             isSimulationRunning = false;
             currentTick = 0;
@@ -150,6 +156,8 @@ namespace MarbleMaker.Core.ECS
                 // Update the PlaySimWorld
                 playSimWorld.Update();
                 
+                // Increment deterministic tick counter
+                SimulationTick.Increment();
                 currentTick++;
                 accumulatedTime -= fixedTimestep;
                 

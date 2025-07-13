@@ -262,7 +262,7 @@ namespace MarbleMaker.Core.ECS
                     ecb.AddComponent<PendingGoalCollection>(marbleEntity, new PendingGoalCollection 
                     { 
                         goalEntity = goalEntity,
-                        arrivalTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE)
+                        arrivalTick = (long)SimulationTick.Current
                     });
                 }
             }

@@ -38,7 +38,7 @@ namespace MarbleMaker.Core.ECS
             }
 
             // Get current tick for deterministic spawning
-            var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
+            var currentTick = (long)SimulationTick.Current;
             
             // Only spawn on tick 0 for initial spawning
             if (currentTick == 0)
@@ -72,14 +72,7 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void InitializeMarbleArchetype(ref SystemState state)
         {
-            var entityManager = state.EntityManager;
-            marbleArchetype = entityManager.CreateArchetype(
-                typeof(TranslationFP),
-                typeof(VelocityFP),
-                typeof(AccelerationFP),
-                typeof(CellIndex),
-                typeof(MarbleTag)
-            );
+            marbleArchetype = Archetypes.Marble;
         }
 
         /// <summary>
@@ -127,6 +120,7 @@ namespace MarbleMaker.Core.ECS
     /// This runs at the end of ModuleLogicGroup to spawn marbles from collectors, cannons, etc.
     /// From marble lifecycle: "Runtime Spawns - CollectorDequeueSystem, CannonFireSystem, SplitterLogicSystem"
     /// </summary>
+    [DisableAutoCreation]
     [UpdateInGroup(typeof(ModuleLogicGroup))]
     [UpdateAfter(typeof(CollectorDequeueSystem))]
     [BurstCompile]
@@ -161,14 +155,7 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         private void InitializeMarbleArchetype(ref SystemState state)
         {
-            var entityManager = state.EntityManager;
-            marbleArchetype = entityManager.CreateArchetype(
-                typeof(TranslationFP),
-                typeof(VelocityFP),
-                typeof(AccelerationFP),
-                typeof(CellIndex),
-                typeof(MarbleTag)
-            );
+            marbleArchetype = Archetypes.Marble;
         }
 
         /// <summary>

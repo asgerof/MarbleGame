@@ -109,7 +109,7 @@ namespace MarbleMaker.Core.ECS
             allMarbles.FastClear();
 
             // Get current tick for deterministic ordering
-            var currentTick = (long)(SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE);
+            var currentTick = (long)SimulationTick.Current;
 
             // Step 1: Populate debris cells hash
             var populateDebrisJob = new PopulateDebrisHashJob
@@ -126,16 +126,8 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = populateMarbleHashJob.ScheduleParallel(state.Dependency);
 
-            // Step 2.5: Extract unique keys from cell hash
-            var extractKeysJob = new ExtractUniqueKeysJob
-            {
-                cellHash = cellHash,
-                uniqueKeys = uniqueKeys
-            };
-            state.Dependency = extractKeysJob.Schedule(state.Dependency);
-
-            // Step 3: Generate collision pairs for parallel processing
-            var generatePairsJob = new GenerateCollisionPairsJob
+            // Step 2.5: Extract unique keys and generate collision pairs (combined)
+            var extractAndGenerateJob = new ExtractKeysAndGenerateCollisionPairsJob
             {
                 cellHash = cellHash,
                 debrisCells = debrisCells,
@@ -144,7 +136,7 @@ namespace MarbleMaker.Core.ECS
                 collisionPairs = collisionPairs,
                 allMarbles = allMarbles
             };
-            state.Dependency = generatePairsJob.Schedule(state.Dependency);
+            state.Dependency = extractAndGenerateJob.Schedule(state.Dependency);
             var processCollisionJob = new ProcessCollisionJob
             {
                 collisionPairs = collisionPairs,
@@ -154,9 +146,9 @@ namespace MarbleMaker.Core.ECS
             };
             state.Dependency = processCollisionJob.Schedule(state.Dependency);
 
-            // Apply collision results will be done by ECB system
-            var ecbSystem = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>();
-            ecbSystem.AddJobHandleForProducer(state.Dependency);
+            // Complete jobs and apply collision results
+            state.Dependency.Complete();
+            ApplyCollisionResults(ref state);
         }
 
         /// <summary>
@@ -217,23 +209,6 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Job to extract unique keys from cell hash
-    /// </summary>
-    [BurstCompile]
-    public struct ExtractUniqueKeysJob : IJob
-    {
-        [ReadOnly] public NativeMultiHashMap<ulong, MarbleHandle> cellHash;
-        public NativeList<ulong> uniqueKeys;
-
-        public void Execute()
-        {
-            cellHash.GetKeyArray(ref uniqueKeys);
-        }
-    }
-
-
-
-    /// <summary>
     /// Represents a collision pair for parallel processing
     /// </summary>
     public struct CollisionPair
@@ -253,20 +228,25 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Job to generate collision pairs for parallel processing
+    /// Combined job to extract unique keys and generate collision pairs
+    /// Reduces synchronization overhead by combining two sequential jobs
     /// </summary>
     [BurstCompile]
-    public struct GenerateCollisionPairsJob : IJob
+    public struct ExtractKeysAndGenerateCollisionPairsJob : IJob
     {
         [ReadOnly] public NativeMultiHashMap<ulong, MarbleHandle> cellHash;
         [ReadOnly] public NativeHashSet<ulong> debrisCells;
-        [ReadOnly] public NativeList<ulong> uniqueKeys;
+        public NativeList<ulong> uniqueKeys;
         public NativeHashSet<ulong> processedKeys;
         public NativeList<CollisionPair> collisionPairs;
         public NativeList<MarbleHandle> allMarbles;
 
         public void Execute()
         {
+            // Extract unique keys from cell hash
+            cellHash.GetKeyArray(ref uniqueKeys);
+            
+            // Generate collision pairs
             processedKeys.EnsureCapacity(uniqueKeys.Length);
             processedKeys.Clear();
             

@@ -22,7 +22,7 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            var currentTick = SystemAPI.Time.ElapsedTime * GameConstants.TICK_RATE;
+            var currentTick = (long)SimulationTick.Current;
             var absoluteTick = (long)currentTick;
 
             // Process click action events

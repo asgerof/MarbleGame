@@ -9,6 +9,7 @@ namespace MarbleMaker.Core.ECS
     /// Compacts marble arrays and frees ID pool after collisions
     /// From ECS docs: "DebrisCompactionSystem (ScheduleParallel) • Remove dead marbles; free id pool"
     /// </summary>
+    [DisableAutoCreation]
     [UpdateInGroup(typeof(MotionGroup))]
     [UpdateAfter(typeof(CollisionDetectSystem))]
     [BurstCompile]
