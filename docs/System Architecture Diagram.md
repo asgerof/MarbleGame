@@ -1,7 +1,7 @@
 # System Architecture Diagram
 
 *Bird's-eye view of major subsystems, the lines between them, and who owns each thread.*
-*Last updated 5 Jul 2025*
+*Last updated 13 Jul 2025*
 
 ---
 
@@ -34,8 +34,9 @@ Provide a one-page mental map for every engineer: where code lives, how data flo
 │  (DOTS World, 120 Hz)         │    │  (Addressables / Bundles)   │
 │  • Marble Motion Jobs         │    │  – Async I/O Threads        │
 │  • Collision & Debris Jobs    │    │  – LZ4 decompress           │
-│  • Module State Machines      │    └────────────┬────────────────┘
-│  (Job Worker Threads)         │                 │Prefab handles
+│  • Lookup Cache Rebuild       │    └────────────┬────────────────┘
+│  • Module State Machines      │                 │Prefab handles
+│  (Job Worker Threads)         │                 │
 └──────────────┬────────────────┘                 ▼
  Snapshot ECS ►│                             ┌─────────────┐
                │                             │     RENDER   │  <-- Main Thread (late)
@@ -83,7 +84,7 @@ Provide a one-page mental map for every engineer: where code lives, how data flo
    * Queues structural edits in Edit mode.
 4. **Simulation Step Loop** (Job System, 0 – N times)
 
-   * `InteractJob` → `MarbleIntegrateJob` → `CollisionSweepJob` → `ModuleStateJob` → `CompactionJob`
+   * `InteractJob` → `MarbleIntegrateJob` → `LookupCacheRebuildJob` → `ModuleStateJob` → `CompactionJob`
 5. **Main Thread gathers `SnapshotBlob`** for interpolation.
 6. **LateUpdate & Render** (Main)
 

@@ -135,6 +135,7 @@ namespace MarbleMaker.Core.ECS
         /// Convenience wrapper so caller doesn't have to unpack CellIndex.
         /// `cellLookup` *must* be read-only.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetMarbleAtSplitter(
             in Entity splitter,
             in ComponentLookup<CellIndex> cellLookup,
@@ -148,6 +149,7 @@ namespace MarbleMaker.Core.ECS
             return TryGetMarbleAtCell(cellLookup[splitter].xyz, out marble);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetMarbleAtLift(
             in Entity lift,
             in ComponentLookup<CellIndex> cellLookup,

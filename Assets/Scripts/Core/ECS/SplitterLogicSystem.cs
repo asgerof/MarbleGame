@@ -329,8 +329,10 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(applyHandle);
 
-            // Set final dependency
+            // Set final dependency and dispose queues
             state.Dependency = faultHandle;
+            state.Dependency = inputDetectionQueue.Dispose(state.Dependency);
+            state.Dependency = faultQueue.Dispose(state.Dependency);
         }
     }
 

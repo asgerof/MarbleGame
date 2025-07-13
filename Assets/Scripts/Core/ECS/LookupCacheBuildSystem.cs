@@ -17,6 +17,12 @@ namespace MarbleMaker.Core.ECS
 #if ENABLE_PROFILER
         static readonly ProfilerMarker _clearMarker = new ProfilerMarker("LookupCache.Clear");
 #endif
+        
+        // High-water mark optimization to reduce O(N) resize operations
+        private static int _splitterHighWaterMark = 1024;
+        private static int _liftHighWaterMark = 1024;  
+        private static int _goalHighWaterMark = 1024;
+        private static int _marbleHighWaterMark = 4096;
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
@@ -60,10 +66,27 @@ namespace MarbleMaker.Core.ECS
             int goalCount     = SystemAPI.QueryBuilder().WithAll<CellIndex, GoalPad>().CalculateEntityCount();
             int marbleCount   = SystemAPI.QueryBuilder().WithAll<CellIndex, MarbleTag>().CalculateEntityCount();
 
-            ECSLookups.SplittersByCell.EnsureCapacity(splitterCount);
-            ECSLookups.LiftsByCell.EnsureCapacity(liftCount);
-            ECSLookups.GoalsByCell.EnsureCapacity(goalCount);
-            ECSLookups.MarblesByCell.EnsureCapacity(marbleCount);
+            // Use high-water marks to avoid frequent resizing
+            if (splitterCount > _splitterHighWaterMark)
+            {
+                _splitterHighWaterMark = splitterCount * 2;
+                ECSLookups.SplittersByCell.EnsureCapacity(_splitterHighWaterMark);
+            }
+            if (liftCount > _liftHighWaterMark)
+            {
+                _liftHighWaterMark = liftCount * 2;
+                ECSLookups.LiftsByCell.EnsureCapacity(_liftHighWaterMark);
+            }
+            if (goalCount > _goalHighWaterMark)
+            {
+                _goalHighWaterMark = goalCount * 2;
+                ECSLookups.GoalsByCell.EnsureCapacity(_goalHighWaterMark);
+            }
+            if (marbleCount > _marbleHighWaterMark)
+            {
+                _marbleHighWaterMark = marbleCount * 2;
+                ECSLookups.MarblesByCell.EnsureCapacity(_marbleHighWaterMark);
+            }
 
             // ------------------------------------------------------------------
             // 2. Schedule population passes (run in parallel)

@@ -23,6 +23,22 @@ The project includes comprehensive documentation in the `docs/` folder:
 - **[Technical Design Document (TDD)](docs/TDD.md)** - Technical implementation details
 - **[System Architecture](docs/System%20Architecture%20Diagram.md)** - High-level system architecture
 
+## Key Features
+
+### Deterministic ECS Lookups
+The simulation engine features a high-performance, deterministic entity lookup system:
+
+- **Unified API**: `ECSLookups` provides consistent access to splitters, lifts, goals, and marbles by cell position
+- **Frame-rebuilt caches**: `LookupCacheBuildSystem` rebuilds spatial hash maps every frame for deterministic queries
+- **System group ordering**: `MotionGroup → LookupCacheGroup → ModuleLogicGroup` ensures consistent state
+- **Deterministic multi-value selection**: When multiple entities occupy the same cell, selection uses `Entity.Index` comparison for replay consistency
+
+### Performance Optimizations
+- Aggressive inlining of hot-path lookup methods
+- High-water mark capacity management to reduce allocations
+- Parallel cache population with proper dependency management
+- World isolation prevents cross-world cache pollution
+
 ## Getting Started
 
 This project is currently in the planning and documentation phase. Implementation details and setup instructions will be added as development progresses.
