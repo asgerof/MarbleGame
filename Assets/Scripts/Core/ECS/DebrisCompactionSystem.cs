@@ -2,6 +2,7 @@ using Unity.Entities;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
+using MarbleMaker.Core.ECS;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -16,10 +17,14 @@ namespace MarbleMaker.Core.ECS
     public partial struct DebrisCompactionSystem : ISystem
     {
         private NativeList<Entity> entitiesToRemove;
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
+            
             // Initialize collections for compaction
             int initialCapacity = 1024;
             int expectedPeak = 10000; // from design doc
@@ -57,7 +62,9 @@ namespace MarbleMaker.Core.ECS
 
             // Schedule the compaction job
             state.Dependency = collectDeadEntitiesJob.Schedule(state.Dependency);
-            state.Dependency.Complete();
+            
+            // Register job handle with ECB system to avoid sync point
+            _endSim.AddJobHandleForProducer(state.Dependency);
 
             // Clean up any remaining references or perform additional compaction
             if (entitiesToRemove.Length > 0)

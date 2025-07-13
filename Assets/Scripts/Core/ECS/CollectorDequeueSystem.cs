@@ -74,26 +74,7 @@ namespace MarbleMaker.Core.ECS
             state.Dependency = faultHandle;
         }
 
-        /// <summary>
-        /// Ensures buffer has sufficient capacity using exponential growth
-        /// Called on main thread only
-        /// </summary>
-        [BurstCompile]
-        private static void EnsureCapacity(DynamicBuffer<CollectorQueueElem> queue, int required)
-        {
-            if (required <= queue.Capacity) return;
-            
-            // Track high water mark to prevent thrashing
-            int needed = math.max(required, _marbleReleaseHighWaterMark);
-            if (needed > _marbleReleaseHighWaterMark)
-            {
-                _marbleReleaseHighWaterMark = MathUtils.NextPowerOfTwo(needed);
-            }
-            
-            // Ensure power-of-two for efficient masking
-            int newCapacity = MathUtils.NextPowerOfTwo(required);
-            queue.Capacity = newCapacity;
-        }
+
     }
 
     /// <summary>

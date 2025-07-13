@@ -33,6 +33,12 @@ namespace MarbleMaker.Core.ECS
         }
 
         [BurstCompile]
+        public void OnDestroy(ref SystemState state)
+        {
+            // No persistent containers to dispose in this system
+        }
+
+        [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
             // Set up temporary containers for this frame

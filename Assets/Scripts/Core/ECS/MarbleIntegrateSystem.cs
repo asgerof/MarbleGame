@@ -4,6 +4,8 @@ using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MarbleGame.Core.Math;
+using MarbleGame.MathFP;
+using System.Runtime.CompilerServices;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -22,6 +24,8 @@ namespace MarbleMaker.Core.ECS
         private static readonly long FRICTION_ACCEL_FP = Fixed32.FromFloat(-0.05f).Raw;
         private static readonly long CELL_SIZE_FP = Fixed32.ONE.Raw; // 1.0 cell in Q32.32
         private static readonly long DELTA_TIME_FP = Fixed32.TickDuration.Raw;
+
+        // Note: Using FixedMath.Clamp from MathFP utility for consistency
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -63,19 +67,19 @@ namespace MarbleMaker.Core.ECS
                           in AccelerationComponent acceleration, ref CellIndex cellIndex)
         {
             // Step 1: Integrate velocity: v += a * Δt (pure fixed-point math)
-            velocity.Value.x += FixedPoint.Mul(acceleration.Value.x, deltaTime);
-            velocity.Value.y += FixedPoint.Mul(acceleration.Value.y, deltaTime);
-            velocity.Value.z += FixedPoint.Mul(acceleration.Value.z, deltaTime);
+            velocity.Value.x += (acceleration.Value.x * deltaTime) >> 32;
+            velocity.Value.y += (acceleration.Value.y * deltaTime) >> 32;
+            velocity.Value.z += (acceleration.Value.z * deltaTime) >> 32;
 
             // Step 2: Clamp velocity to terminal speed using pure integer math
-            velocity.Value.x = math.clamp(velocity.Value.x, -terminalSpeed, terminalSpeed);
-            velocity.Value.y = math.clamp(velocity.Value.y, -terminalSpeed, terminalSpeed);
-            velocity.Value.z = math.clamp(velocity.Value.z, -terminalSpeed, terminalSpeed);
+            velocity.Value.x = FixedMath.Clamp(velocity.Value.x, -terminalSpeed, terminalSpeed);
+            velocity.Value.y = FixedMath.Clamp(velocity.Value.y, -terminalSpeed, terminalSpeed);
+            velocity.Value.z = FixedMath.Clamp(velocity.Value.z, -terminalSpeed, terminalSpeed);
 
             // Step 3: Integrate position: p += v * Δt (pure fixed-point math)
-            position.Value.x += FixedPoint.Mul(velocity.Value.x, deltaTime);
-            position.Value.y += FixedPoint.Mul(velocity.Value.y, deltaTime);
-            position.Value.z += FixedPoint.Mul(velocity.Value.z, deltaTime);
+            position.Value.x += (velocity.Value.x * deltaTime) >> 32;
+            position.Value.y += (velocity.Value.y * deltaTime) >> 32;
+            position.Value.z += (velocity.Value.z * deltaTime) >> 32;
 
             // Step 4: Update CellIndex when crossing grid border using pure integer division
             var newCellIndex = CalculateCellIndex(position.Value, cellSize);
