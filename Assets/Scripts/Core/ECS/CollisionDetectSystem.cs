@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MarbleMaker.Core.ECS;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -37,14 +38,14 @@ namespace MarbleMaker.Core.ECS
             int maxMarbles = GameConstants.MAX_MARBLES_PC; // TODO: Platform-specific
             int capacity = (int)(maxMarbles * 1.2f);
             
-            cellHash = new NativeMultiHashMap<ulong, MarbleHandle>(capacity, Allocator.Persistent);
-            debrisCells = new NativeHashSet<ulong>(capacity / 4, Allocator.Persistent);
-            marblesToDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
-            debrisToSpawn = new NativeList<int3>(1000, Allocator.Persistent);
-            uniqueKeys = new NativeList<ulong>(1000, Allocator.Persistent);
-            processedKeys = new NativeHashSet<ulong>(1000, Allocator.Persistent);
-            collisionPairs = new NativeList<CollisionPair>(1000, Allocator.Persistent);
-            allMarbles = new NativeList<MarbleHandle>(capacity, Allocator.Persistent);
+            if (!cellHash.IsCreated) cellHash = new NativeMultiHashMap<ulong, MarbleHandle>(capacity, Allocator.Persistent);
+            if (!debrisCells.IsCreated) debrisCells = new NativeHashSet<ulong>(capacity / 4, Allocator.Persistent);
+            if (!marblesToDestroy.IsCreated) marblesToDestroy = new NativeList<Entity>(1000, Allocator.Persistent);
+            if (!debrisToSpawn.IsCreated) debrisToSpawn = new NativeList<int3>(1000, Allocator.Persistent);
+            if (!uniqueKeys.IsCreated) uniqueKeys = new NativeList<ulong>(1000, Allocator.Persistent);
+            if (!processedKeys.IsCreated) processedKeys = new NativeHashSet<ulong>(1000, Allocator.Persistent);
+            if (!collisionPairs.IsCreated) collisionPairs = new NativeList<CollisionPair>(1000, Allocator.Persistent);
+            if (!allMarbles.IsCreated) allMarbles = new NativeList<MarbleHandle>(capacity, Allocator.Persistent);
         }
 
         [BurstCompile]

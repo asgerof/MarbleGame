@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MarbleMaker.Core;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -46,7 +47,9 @@ namespace MarbleMaker.Core.ECS
                 SystemAPI.Query<RefRW<CollectorState>, DynamicBuffer<CollectorQueueElem>>()
                 .WithEntityAccess())
             {
-                if (collectorState.ValueRO.count > 0)
+                // Calculate queue count using head and tail
+                int queueCount = (collectorState.ValueRO.Tail - collectorState.ValueRO.Head);
+                if (queueCount > 0)
                 {
                     ProcessCollectorDequeue(ref collectorState.ValueRW, queueBuffer, ecb, _marbleArchetype);
                 }
@@ -82,62 +85,28 @@ namespace MarbleMaker.Core.ECS
             {
                 queue.Capacity = capacity;
             }
-            uint MASK = (uint)(capacity - 1); // Power of 2 mask for circular buffer operations
+            
+            // Initialize CapacityMask if this is the first time
+            if (state.CapacityMask == 0)
+                state.CapacityMask = (uint)(capacity - 1);
+            
+            uint MASK = state.CapacityMask; // Use the stored mask
 
-            switch (state.level)
+            // Calculate current queue count
+            int queueCount = (state.Tail - state.Head) & (int)MASK;
+            
+            // Basic dequeue logic - release one marble per frame
+            if (queueCount > 0)
             {
-                case 0: // Basic – flush entire queue
-                    for (uint i = 0; i < state.count; i++)
-                    {
-                        var queueIndex = (int)((state.head + i) & MASK);
-                        if (queueIndex < queue.Length)
-                        {
-                            var queueElem = queue[queueIndex];
-                            ReleaseMarble(ecb, queueElem.marble);
-                        }
-                    }
-                    // Clear the queue
-                    queue.Clear();
-                    state.head = 0;
-                    state.tail = 0;
-                    state.count = 0;
-                    break;
-
-                case 1: // Smart FIFO – single release
-                    if (state.count > 0)
-                    {
-                        var queueIndex = (int)(state.head & MASK);
-                        if (queueIndex < queue.Length)
-                        {
-                            var queueElem = queue[queueIndex];
-                            ReleaseMarble(ecb, queueElem.marble);
-                            
-                            // Update circular buffer indices
-                            state.head = (state.head + 1) & MASK;
-                            state.count--;
-                        }
-                    }
-                    break;
-
-                case 2: // Burst-N (configurable)
-                    uint burst = math.min(state.burstSize, state.count);
-                    for (uint i = 0; i < burst; i++)
-                    {
-                        var queueIndex = (int)((state.head + i) & MASK);
-                        if (queueIndex < queue.Length)
-                        {
-                            var queueElem = queue[queueIndex];
-                            ReleaseMarble(ecb, queueElem.marble);
-                        }
-                    }
-                    // Update circular buffer indices
-                    state.head = (state.head + burst) & MASK;
-                    state.count -= burst;
-                    break;
-
-                default:
-                    // Unknown level, treat as basic
-                    goto case 0;
+                var queueIndex = state.Head & (int)MASK;
+                if (queueIndex < queue.Length)
+                {
+                    var queueElem = queue[queueIndex];
+                    ReleaseMarble(ecb, queueElem.marble);
+                    
+                    // Update circular buffer head
+                    state.Head = (state.Head + 1) & (int)MASK;
+                }
             }
         }
 
@@ -226,6 +195,10 @@ namespace MarbleMaker.Core.ECS
         private void EnqueueMarble(ref CollectorState state, DynamicBuffer<CollectorQueueElem> queue, 
             Entity marble, long enqueueTick)
         {
+            // Initialize CapacityMask if this is the first time
+            if (state.CapacityMask == 0)
+                state.CapacityMask = (uint)(queue.Length - 1);
+            
             // Add marble to queue
             var queueElem = new CollectorQueueElem
             {
@@ -235,9 +208,8 @@ namespace MarbleMaker.Core.ECS
             
             queue.Add(queueElem);
             
-            // Update state
-            state.count++;
-            state.tail = (state.tail + 1) & 0xFFFFFFFF; // Circular buffer
+            // Update state using proper capacity mask
+            state.Tail = (state.Tail + 1) & (int)state.CapacityMask;
         }
     }
 }

@@ -1,6 +1,7 @@
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Burst;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -8,40 +9,25 @@ namespace MarbleMaker.Core.ECS
     /// Fixed-point position component (Q32.32 fixed-point)
     /// From ECS docs: "TranslationFP, VelocityFP, AccelerationFP, CellIndex, MarbleTag (32 B aligned)"
     /// </summary>
-    public struct TranslationFP : IComponentData
+    public struct TranslationComponent : IComponentData
     {
-        public long value;                 // Q32.32 fixed-point
-        
-        public static TranslationFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
-        public float ToFloat() => FixedPoint.ToFloat(value);
-        
-        public static TranslationFP Zero => new() { value = 0 };
+        public Fixed32 Value;
     }
 
     /// <summary>
     /// Fixed-point velocity component (Q32.32 fixed-point)
     /// </summary>
-    public struct VelocityFP : IComponentData
+    public struct VelocityComponent : IComponentData
     {
-        public long value;                 // Q32.32 fixed-point
-        
-        public static VelocityFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
-        public float ToFloat() => FixedPoint.ToFloat(value);
-        
-        public static VelocityFP Zero => new() { value = 0 };
+        public Fixed32 Value;
     }
 
     /// <summary>
     /// Fixed-point acceleration component (Q32.32 fixed-point)
     /// </summary>
-    public struct AccelerationFP : IComponentData
+    public struct AccelerationComponent : IComponentData
     {
-        public long value;                 // Q32.32 fixed-point
-        
-        public static AccelerationFP FromFloat(float f) => new() { value = FixedPoint.FromFloat(f) };
-        public float ToFloat() => FixedPoint.ToFloat(value);
-        
-        public static AccelerationFP Zero => new() { value = 0 };
+        public Fixed32 Value;
     }
 
     /// <summary>
@@ -107,9 +93,8 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public struct SplitterState : IComponentData
     {
-        public int currentExit;     // 0 or 1 for two-way splitter
-        public bool overrideExit;   // true if player clicked to override
-        public int overrideValue;   // the overridden exit value
+        public byte NextLaneIndex;   // round-robin pointer
+        public bool OverrideEnabled; // set by click
     }
 
     /// <summary>
@@ -118,11 +103,9 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public struct CollectorState : IComponentData
     {
-        public byte level;              // 0 = Basic, 1 = FIFO, 2 = Burst-4 ...
-        public uint head;               // circular buffer index
-        public uint tail;
-        public uint count;              // number of marbles in queue
-        public uint burstSize;          // for level 2+ upgrade (configurable burst size)
+        public int  Head;   // dequeue ptr
+        public int  Tail;   // enqueue ptr
+        public uint CapacityMask; // (capacity-1) – MUST be power of two
     }
 
     /// <summary>
@@ -155,6 +138,14 @@ namespace MarbleMaker.Core.ECS
     /// Tag component for lift modules
     /// </summary>
     public struct LiftTag : IComponentData
+    {
+        // Tag component - no data needed
+    }
+
+    /// <summary>
+    /// Tag component for marbles in splitter trigger volume
+    /// </summary>
+    public struct InSplitterTrigger : IComponentData
     {
         // Tag component - no data needed
     }
@@ -305,10 +296,10 @@ namespace MarbleMaker.Core.ECS
         /// Converts fixed-point position to cell index
         /// </summary>
         [BurstCompile]
-        public static int3 PositionToCellIndex(TranslationFP position)
+        public static int3 PositionToCellIndex(Fixed32 position)
         {
             // Convert from Q32.32 fixed-point to grid cell using pure integer math
-            int cellCoord = FixedPoint.ToInt(position.value);
+            int cellCoord = (int)position;
             return new int3(
                 cellCoord,
                 cellCoord, 
@@ -320,11 +311,10 @@ namespace MarbleMaker.Core.ECS
         /// Converts cell index to fixed-point center position
         /// </summary>
         [BurstCompile]
-        public static TranslationFP CellIndexToPosition(int3 cellIndex)
+        public static Fixed32 CellIndexToPosition(int3 cellIndex)
         {
             // Convert grid cell to world position (center of cell)
-            long worldPos = FixedPoint.FromInt(cellIndex.x) + FixedPoint.HALF;
-            return new TranslationFP { value = worldPos };
+            return Fixed32.FromFloat(cellIndex.x) + Fixed32.HALF;
         }
     }
 }

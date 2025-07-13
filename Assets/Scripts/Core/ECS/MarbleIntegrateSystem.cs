@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -16,11 +17,10 @@ namespace MarbleMaker.Core.ECS
     public partial struct MarbleIntegrateSystem : ISystem
     {
         // Fixed-point constants for deterministic physics
-        private static readonly long TICK_DURATION_FP = FixedPoint.FromFloat(1f / 120f); // 1/120 in Q32.32 format
-        private static readonly long TERMINAL_SPEED_FP = FixedPoint.FromFloat(5.0f); // 5.0 in Q32.32 format
-        private static readonly long GRAVITY_ACCEL_FP = FixedPoint.FromFloat(0.1f); // 0.1 in Q32.32 format
-        private static readonly long FRICTION_ACCEL_FP = FixedPoint.FromFloat(-0.05f); // -0.05 in Q32.32 format
-        private static readonly long CELL_SIZE_FP = FixedPoint.ONE; // 1.0 in Q32.32 format
+        private static readonly Fixed32 TERMINAL_SPEED_FP = Fixed32.FromFloat(5.0f); // 5.0 in Q32.32 format
+        private static readonly Fixed32 GRAVITY_ACCEL_FP = Fixed32.FromFloat(0.1f); // 0.1 in Q32.32 format
+        private static readonly Fixed32 FRICTION_ACCEL_FP = Fixed32.FromFloat(-0.05f); // -0.05 in Q32.32 format
+        private static readonly Fixed32 CELL_SIZE_FP = Fixed32.ONE; // 1.0 in Q32.32 format
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -36,7 +36,7 @@ namespace MarbleMaker.Core.ECS
             // Note: Acceleration is now calculated by ModulatedAccelerationSystem
             var marbleIntegrateJob = new MarbleIntegrateJob
             {
-                deltaTime = TICK_DURATION_FP,
+                deltaTime = Fixed32.TickDuration,
                 terminalSpeed = TERMINAL_SPEED_FP,
                 cellSize = CELL_SIZE_FP
             };
@@ -54,27 +54,45 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public struct MarbleIntegrateJob : IJobEntity
     {
-        [ReadOnly] public long deltaTime;
-        [ReadOnly] public long terminalSpeed;
-        [ReadOnly] public long cellSize;
+        [ReadOnly] public Fixed32 deltaTime;
+        [ReadOnly] public Fixed32 terminalSpeed;
+        [ReadOnly] public Fixed32 cellSize;
 
-        public void Execute(ref TranslationFP translation, ref VelocityFP velocity, in AccelerationFP acceleration, ref CellIndex cellIndex)
+        public void Execute(ref TranslationComponent posX, ref TranslationComponent posY, ref TranslationComponent posZ, 
+                          ref VelocityComponent velX, ref VelocityComponent velY, ref VelocityComponent velZ, 
+                          in AccelerationComponent accelX, in AccelerationComponent accelY, in AccelerationComponent accelZ, 
+                          ref CellIndex cellIndex)
         {
             // Step 1: Integrate velocity: v += a * Δt
             // Acceleration is already calculated by ModulatedAccelerationSystem
-            velocity.value += FixedPoint.Mul(acceleration.value, deltaTime);
+            velX.Value += accelX.Value * deltaTime;
+            velY.Value += accelY.Value * deltaTime;
+            velZ.Value += accelZ.Value * deltaTime;
 
             // Step 2: Clamp velocity to terminal speed
-            if (velocity.value > terminalSpeed)
-                velocity.value = terminalSpeed;
-            else if (velocity.value < -terminalSpeed)
-                velocity.value = -terminalSpeed;
+            if (velX.Value.Raw > terminalSpeed.Raw)
+                velX.Value = terminalSpeed;
+            else if (velX.Value.Raw < -terminalSpeed.Raw)
+                velX.Value = new Fixed32(-terminalSpeed.Raw);
+            
+            if (velY.Value.Raw > terminalSpeed.Raw)
+                velY.Value = terminalSpeed;
+            else if (velY.Value.Raw < -terminalSpeed.Raw)
+                velY.Value = new Fixed32(-terminalSpeed.Raw);
+            
+            if (velZ.Value.Raw > terminalSpeed.Raw)
+                velZ.Value = terminalSpeed;
+            else if (velZ.Value.Raw < -terminalSpeed.Raw)
+                velZ.Value = new Fixed32(-terminalSpeed.Raw);
 
             // Step 3: Integrate position: p += v * Δt
-            translation.value += FixedPoint.Mul(velocity.value, deltaTime);
+            posX.Value += velX.Value * deltaTime;
+            posY.Value += velY.Value * deltaTime;
+            posZ.Value += velZ.Value * deltaTime;
 
             // Step 4: Update CellIndex when crossing grid border
-            var newCellIndex = CalculateCellIndex(translation.value);
+            var worldPos = new float3(posX.Value.ToFloat(), posY.Value.ToFloat(), posZ.Value.ToFloat());
+            var newCellIndex = CalculateCellIndex(worldPos);
             if (!newCellIndex.xyz.Equals(cellIndex.xyz))
             {
                 cellIndex.xyz = newCellIndex.xyz;
@@ -82,18 +100,15 @@ namespace MarbleMaker.Core.ECS
         }
 
         /// <summary>
-        /// Calculates cell index from fixed-point position
+        /// Calculates cell index from world position
         /// </summary>
         [BurstCompile]
-        private CellIndex CalculateCellIndex(long positionFP)
+        private static CellIndex CalculateCellIndex(in float3 worldPos)
         {
-            // Convert Q32.32 fixed-point to integer grid position using pure integer math
-            // Position represents world coordinate, cell index is floor(position)
-            int cellX = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS);
-            int cellY = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS); // TODO: Separate Y coordinate when 3D movement is implemented
-            int cellZ = (int)(positionFP >> FixedPoint.FRACTIONAL_BITS); // TODO: Separate Z coordinate when 3D movement is implemented
-            
-            return new CellIndex(cellX, cellY, cellZ);
+            // Assumes 1 Unity unit == 1 grid cell.
+            return new CellIndex(new int3(math.floor(worldPos.x),
+                                         math.floor(worldPos.y),
+                                         math.floor(worldPos.z)));
         }
     }
 

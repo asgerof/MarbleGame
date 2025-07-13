@@ -20,7 +20,7 @@ namespace MarbleMaker.Core.ECS
         public void OnCreate(ref SystemState state)
         {
             // Initialize collections for compaction
-            entitiesToRemove = new NativeList<Entity>(1000, Allocator.Persistent);
+            if (!entitiesToRemove.IsCreated) entitiesToRemove = new NativeList<Entity>(1000, Allocator.Persistent);
         }
 
         [BurstCompile]

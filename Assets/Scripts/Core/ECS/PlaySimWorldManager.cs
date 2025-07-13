@@ -59,7 +59,7 @@ namespace MarbleMaker.Core.ECS
         private void OnEnable()
         {
             // Initialize track command buffer
-            trackCmdBuffer = new NativeList<TrackCommand>(1000, Allocator.Persistent);
+            if (!trackCmdBuffer.IsCreated) trackCmdBuffer = new NativeList<TrackCommand>(1000, Allocator.Persistent);
             hasPendingCommands = false;
             
             // Get reference to authoring world (default world)

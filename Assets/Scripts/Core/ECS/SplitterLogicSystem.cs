@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MarbleMaker.Core.ECS;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -29,9 +30,9 @@ namespace MarbleMaker.Core.ECS
             state.RequireForUpdate<SplitterState>();
             
             // Initialize collections for marble routing
-            marblesToRoute = new NativeList<Entity>(1000, Allocator.Persistent);
-            routingDestinations = new NativeList<int3>(1000, Allocator.Persistent);
-            routingExits = new NativeList<int>(1000, Allocator.Persistent);
+            if (!marblesToRoute.IsCreated) marblesToRoute = new NativeList<Entity>(1000, Allocator.Persistent);
+            if (!routingDestinations.IsCreated) routingDestinations = new NativeList<int3>(1000, Allocator.Persistent);
+            if (!routingExits.IsCreated) routingExits = new NativeList<int>(1000, Allocator.Persistent);
             archetypeInitialized = false;
         }
 
@@ -68,7 +69,9 @@ namespace MarbleMaker.Core.ECS
             {
                 marblesToRoute = marblesToRoute,
                 routingDestinations = routingDestinations,
-                routingExits = routingExits
+                routingExits = routingExits,
+                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true),
+                ecb = ecb.AsParallelWriter()
             };
 
             state.Dependency = processSplittersJob.ScheduleParallel(state.Dependency);
@@ -154,13 +157,12 @@ namespace MarbleMaker.Core.ECS
         public NativeList<Entity> marblesToRoute;
         public NativeList<int3> routingDestinations;
         public NativeList<int> routingExits;
+        [ReadOnly] public ComponentLookup<InSplitterTrigger> triggerLookup;
+        public EntityCommandBuffer.ParallelWriter ecb;
 
         public void Execute(Entity entity, ref SplitterState splitterState, in CellIndex cellIndex)
         {
             // Check if there are marbles to route at this splitter
-            // In a full implementation, this would check for marbles at the splitter's input position
-            
-            // For now, simulate marble routing based on splitter state
             var hasIncomingMarble = ShouldProcessSplitter(entity, cellIndex);
             
             if (hasIncomingMarble)
@@ -180,11 +182,14 @@ namespace MarbleMaker.Core.ECS
                     routingExits.Add(exitToUse);
                 }
                 
+                // Remove the trigger tag after processing
+                ecb.RemoveComponent<InSplitterTrigger>(entity.Index, entity);
+                
                 // Update splitter state for next marble (if not overridden)
-                if (!splitterState.overrideExit)
+                if (!splitterState.OverrideEnabled)
                 {
                     // Toggle exit for round-robin behavior
-                    splitterState.currentExit = splitterState.currentExit == 0 ? 1 : 0;
+                    splitterState.NextLaneIndex = (byte)(splitterState.NextLaneIndex == 0 ? 1 : 0);
                 }
             }
         }
@@ -196,15 +201,15 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private int DetermineExitToUse(ref SplitterState state)
         {
-            if (state.overrideExit)
+            if (state.OverrideEnabled)
             {
                 // Player has overridden the exit choice
-                return state.overrideValue;
+                return state.NextLaneIndex;
             }
             else
             {
                 // Use current exit for round-robin
-                return state.currentExit;
+                return state.NextLaneIndex;
             }
         }
 
@@ -230,13 +235,7 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         private bool ShouldProcessSplitter(Entity splitterEntity, CellIndex cellIndex)
         {
-            // In a full implementation, this would:
-            // 1. Check if there's a marble at the splitter's input position
-            // 2. Verify the marble is ready to be routed
-            // 3. Ensure the output paths are not blocked
-            
-            // For now, return false as a placeholder
-            return false;
+            return triggerLookup.HasComponent(splitterEntity);
         }
 
         /// <summary>
