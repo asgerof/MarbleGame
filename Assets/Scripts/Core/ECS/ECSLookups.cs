@@ -77,14 +77,20 @@ namespace MarbleMaker.Core.ECS
         /// </summary>
         public static bool TryGetGoalAtCell(in int3 cell, out Entity goal)
         {
+            goal = default;
             ulong key = ECSUtils.PackCellKey(cell);
-            var iterator = _goalsByCell.GetValuesForKey(key);
-            if (iterator.MoveNext())
+
+            if (_goalsByCell.TryGetFirstValue(key, out var candidate, out var it))
             {
-                goal = iterator.Current;
+                Entity best = candidate;
+
+                while (_goalsByCell.TryGetNextValue(out candidate, ref it))
+                    if (candidate.Index < best.Index)
+                        best = candidate;
+
+                goal = best;
                 return true;
             }
-            goal = Entity.Null;
             return false;
         }
 

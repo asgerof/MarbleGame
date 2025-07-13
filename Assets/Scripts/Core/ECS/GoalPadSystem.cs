@@ -87,12 +87,13 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(coinHandle);
 
-            // Dispose scratch lists once all dependent jobs finish
-            state.Dependency = JobHandle.CombineDependencies(faultHandle,
-                new ScratchDisposerJob { lists = scratchLists }.Schedule());
-            state.Dependency = goalCollectionQueue.Dispose(state.Dependency);
-            state.Dependency = coinAwardQueue.Dispose(state.Dependency);
-            state.Dependency = faultQueue.Dispose(state.Dependency);
+            // Dispose all containers and scratch lists
+            state.Dependency = JobHandle.CombineDependencies(
+                faultHandle,
+                new ScratchDisposerJob { lists = scratchLists }.Schedule(),
+                goalCollectionQueue.Dispose(faultHandle),
+                coinAwardQueue.Dispose(faultHandle),
+                faultQueue.Dispose(faultHandle));
         }
     }
 
@@ -129,7 +130,6 @@ namespace MarbleMaker.Core.ECS
         public EntityCommandBuffer.ParallelWriter ecb;
 
         [NativeDisableContainerSafetyRestriction]
-        [NativeDisableParallelForRestriction]
         public NativeArray<NativeList<Entity>> scratchLists;
 
         public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
