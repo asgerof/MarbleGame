@@ -92,13 +92,20 @@ namespace MarbleMaker.Core.ECS
 
         public static bool TryGetMarbleAtCell(in int3 cell, out Entity marble)
         {
+            marble = default;
             ulong key = ECSUtils.PackCellKey(cell);
-            if (_marblesByCell.TryGetFirstValue(key, out var e, out var it))
+
+            if (_marblesByCell.TryGetFirstValue(key, out var candidate, out var it))
             {
-                marble = e;                       // lowest Entity.Index returns first
+                Entity best = candidate;
+
+                while (_marblesByCell.TryGetNextValue(out candidate, ref it))
+                    if (candidate.Index < best.Index)
+                        best = candidate;
+
+                marble = best;
                 return true;
             }
-            marble = Entity.Null;
             return false;
         }
 
@@ -132,12 +139,6 @@ namespace MarbleMaker.Core.ECS
                 marble = Entity.Null;
                 return false;
             }
-#if UNITY_ASSERTIONS
-            UnityEngine.Assertions.Assert.IsTrue(
-                cellLookup.HasComponent(splitter),
-                "Splitter entity missing CellIndex!"
-            );
-#endif
             return TryGetMarbleAtCell(cellLookup[splitter].xyz, out marble);
         }
 
@@ -151,12 +152,6 @@ namespace MarbleMaker.Core.ECS
                 marble = Entity.Null;
                 return false;
             }
-#if UNITY_ASSERTIONS
-            UnityEngine.Assertions.Assert.IsTrue(
-                cellLookup.HasComponent(lift),
-                "Lift entity missing CellIndex!"
-            );
-#endif
             return TryGetMarbleAtCell(cellLookup[lift].xyz, out marble);
         }
 

@@ -14,6 +14,9 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct LookupCacheBuildSystem : ISystem
     {
+#if ENABLE_PROFILER
+        static readonly ProfilerMarker _clearMarker = new ProfilerMarker("LookupCache.Clear");
+#endif
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
@@ -27,7 +30,7 @@ namespace MarbleMaker.Core.ECS
             // 1. Clear caches on the main thread (O(capacity) once per frame)
             // ------------------------------------------------------------------
 #if ENABLE_PROFILER
-            using (new ProfilerMarker("LookupCache.Clear").Auto())
+            using (_clearMarker.Auto())
 #endif
             {
                 ECSLookups.SplittersByCell.Clear();

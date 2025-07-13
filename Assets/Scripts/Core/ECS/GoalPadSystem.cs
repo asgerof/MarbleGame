@@ -63,7 +63,7 @@ namespace MarbleMaker.Core.ECS
                 scratchLists = scratchLists
             };
             var processHandle = processGoalPadsJob.ScheduleParallel(state.Dependency);
-            processHandle.Complete();                               // ensure job is done before disposing
+            state.Dependency = processHandle;
 
             // Apply goal collections
             var applyGoalCollectionsJob = new ApplyGoalCollectionsJob
@@ -71,7 +71,7 @@ namespace MarbleMaker.Core.ECS
                 goalCollectionQueue = goalCollectionQueue,
                 ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
             };
-            var applyHandle = applyGoalCollectionsJob.Schedule(processHandle);
+            var applyHandle = applyGoalCollectionsJob.Schedule(state.Dependency);
 
             // Process coin awards
             var processCoinAwardsJob = new ProcessCoinAwardsJob
@@ -87,13 +87,9 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(coinHandle);
 
-            // Dispose scratch lists
-            for (int i = 0; i < threadCount; i++)
-                scratchLists[i].Dispose();
-            scratchLists.Dispose();
-
-            // Set final dependency and dispose queues
-            state.Dependency = faultHandle;
+            // Dispose scratch lists once all dependent jobs finish
+            state.Dependency = JobHandle.CombineDependencies(faultHandle,
+                new ScratchDisposerJob { lists = scratchLists }.Schedule());
             state.Dependency = goalCollectionQueue.Dispose(state.Dependency);
             state.Dependency = coinAwardQueue.Dispose(state.Dependency);
             state.Dependency = faultQueue.Dispose(state.Dependency);
@@ -132,6 +128,7 @@ namespace MarbleMaker.Core.ECS
         public NativeQueue<Fault>.ParallelWriter faultQueue;
         public EntityCommandBuffer.ParallelWriter ecb;
 
+        [NativeDisableContainerSafetyRestriction]
         [NativeDisableParallelForRestriction]
         public NativeArray<NativeList<Entity>> scratchLists;
 
@@ -452,5 +449,17 @@ namespace MarbleMaker.Core.ECS
         Sequence = 2,                       // Marbles must arrive in specific order
         Multiplier = 3,                     // Multiplies coin rewards
         Bonus = 4                           // Provides bonus rewards
+    }
+
+    [BurstCompile]
+    struct ScratchDisposerJob : IJob
+    {
+        public NativeArray<NativeList<Entity>> lists;
+        public void Execute()
+        {
+            for (int i = 0; i < lists.Length; i++)
+                lists[i].Dispose();
+            lists.Dispose();
+        }
     }
 } 
