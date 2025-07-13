@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MarbleMaker.Core.ECS;
+using MarbleGame.Core.Math;
 
 namespace MarbleMaker.Core.ECS
 {
@@ -17,9 +18,11 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct LiftStepSystem : ISystem
     {
-        private NativeList<Entity> marblesToMove;
-        private NativeList<int3> targetPositions;
-        private NativeList<VelocityFP> targetVelocities;
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+        
+        // High water mark for capacity management
+        private static int _liftOperationHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -27,99 +30,72 @@ namespace MarbleMaker.Core.ECS
             // System requires lift entities to process
             state.RequireForUpdate<LiftState>();
             
-            // Initialize collections for marble movement
-            int initialCapacity = 1024;
-            int expectedPeak = 10000; // from design doc
-            
-            if (!marblesToMove.IsCreated) 
-            {
-                marblesToMove = new NativeList<Entity>(initialCapacity, Allocator.Persistent);
-                marblesToMove.Capacity = math.max(marblesToMove.Capacity, expectedPeak);
-            }
-            if (!targetPositions.IsCreated) 
-            {
-                targetPositions = new NativeList<int3>(initialCapacity, Allocator.Persistent);
-                targetPositions.Capacity = math.max(targetPositions.Capacity, expectedPeak);
-            }
-            if (!targetVelocities.IsCreated) 
-            {
-                targetVelocities = new NativeList<VelocityFP>(initialCapacity, Allocator.Persistent);
-                targetVelocities.Capacity = math.max(targetVelocities.Capacity, expectedPeak);
-            }
-        }
-
-        [BurstCompile]
-        public void OnDestroy(ref SystemState state)
-        {
-            // Clean up native collections
-            if (marblesToMove.IsCreated) marblesToMove.Dispose();
-            if (targetPositions.IsCreated) targetPositions.Dispose();
-            if (targetVelocities.IsCreated) targetVelocities.Dispose();
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Clear previous frame data
-            marblesToMove.FastClear();
-            targetPositions.FastClear();
-            targetVelocities.FastClear();
+            // Set up temporary containers for this frame
+            var liftOperationQueue = new NativeQueue<LiftOperation>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
 
             // Get ECB for marble movement
-            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
-                .CreateCommandBuffer(state.WorldUnmanaged);
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
 
-            // Process active lifts and move marbles
+            // Process lifts in parallel
             var processLiftsJob = new ProcessLiftsJob
             {
-                marblesToMove = marblesToMove,
-                targetPositions = targetPositions,
-                targetVelocities = targetVelocities
+                liftOperationQueue = liftOperationQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb
             };
+            var processHandle = processLiftsJob.ScheduleParallel(state.Dependency);
 
-            state.Dependency = processLiftsJob.ScheduleParallel(state.Dependency);
-            state.Dependency.Complete();
-
-            // Apply marble movement
-            ApplyMarbleMovement(ecb);
-        }
-
-        /// <summary>
-        /// Applies marble movement by updating their positions and velocities
-        /// </summary>
-        private void ApplyMarbleMovement(EntityCommandBuffer ecb)
-        {
-            for (int i = 0; i < marblesToMove.Length; i++)
+            // Apply lift operations
+            var applyLiftOperationsJob = new ApplyLiftOperationsJob
             {
-                var marble = marblesToMove[i];
-                var targetPosition = targetPositions[i];
-                var targetVelocity = targetVelocities[i];
+                liftOperationQueue = liftOperationQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyLiftOperationsJob.Schedule(processHandle);
 
-                // Update marble position
-                ecb.SetComponent(marble, new CellIndex(targetPosition));
-                
-                // Update marble velocity
-                ecb.SetComponent(marble, targetVelocity);
-                
-                // Update physical position for smooth movement
-                var centerPosition = ECSUtils.CellIndexToPosition(targetPosition);
-                ecb.SetComponent(marble, centerPosition);
-            }
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(applyHandle);
+
+            // Set final dependency
+            state.Dependency = faultHandle;
         }
     }
 
     /// <summary>
-    /// Job to process lift logic and move marbles
-    /// From ECS docs: "Move marble up one cell per tick when active"
+    /// Represents a lift operation (single AoS struct instead of multiple arrays)
+    /// </summary>
+    public struct LiftOperation
+    {
+        public Entity marble;
+        public int3 targetPosition;
+        public VelocityComponent targetVelocity;
+        public Entity liftEntity;
+    }
+
+    /// <summary>
+    /// Job to process lift logic and generate lift operations
     /// </summary>
     [BurstCompile]
     public struct ProcessLiftsJob : IJobEntity
     {
-        public NativeList<Entity> marblesToMove;
-        public NativeList<int3> targetPositions;
-        public NativeList<VelocityFP> targetVelocities;
+        public NativeQueue<LiftOperation>.ParallelWriter liftOperationQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
+        public EntityCommandBuffer.ParallelWriter ecb;
 
-        public void Execute(Entity entity, ref LiftState liftState, in CellIndex cellIndex)
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           ref LiftState liftState, in CellIndex cellIndex)
         {
             // Only process active lifts
             if (!liftState.isActive)
@@ -137,15 +113,21 @@ namespace MarbleMaker.Core.ECS
             var marbleEntity = GetMarbleAtLift(entity, cellIndex);
             if (marbleEntity != Entity.Null)
             {
-                // Move marble up one cell
+                // Calculate target position (move up one cell)
                 var currentPosition = cellIndex.xyz;
-                var targetPosition = currentPosition + new int3(0, 1, 0); // Move up one cell
+                var targetPosition = currentPosition + new int3(0, 1, 0);
+                
+                // Calculate lift velocity
                 var liftVelocity = CalculateLiftVelocity();
 
-                // Add to movement lists
-                marblesToMove.Add(marbleEntity);
-                targetPositions.Add(targetPosition);
-                targetVelocities.Add(liftVelocity);
+                // Queue lift operation
+                liftOperationQueue.Enqueue(new LiftOperation
+                {
+                    marble = marbleEntity,
+                    targetPosition = targetPosition,
+                    targetVelocity = liftVelocity,
+                    liftEntity = entity
+                });
 
                 // Update lift state
                 liftState.currentHeight++;
@@ -156,11 +138,11 @@ namespace MarbleMaker.Core.ECS
         /// Calculates the velocity for marbles being lifted
         /// </summary>
         [BurstCompile]
-        private VelocityFP CalculateLiftVelocity()
+        private VelocityComponent CalculateLiftVelocity()
         {
             // Lifts move marbles at a constant upward velocity
-            float liftSpeed = 2.0f; // cells/second upward
-            return VelocityFP.FromFloat(liftSpeed);
+            long liftSpeed = Fixed32.FromFloat(2.0f).Raw; // cells/second upward
+            return new VelocityComponent { Value = new Fixed32x3(0, liftSpeed, 0) };
         }
 
         /// <summary>
@@ -179,6 +161,58 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
+    /// Job to apply lift operations
+    /// </summary>
+    [BurstCompile]
+    public struct ApplyLiftOperationsJob : IJob
+    {
+        public NativeQueue<LiftOperation> liftOperationQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all lift operations
+            while (liftOperationQueue.TryDequeue(out var operation))
+            {
+                // Update marble position
+                ecb.SetComponent(operation.marble, new CellIndex(operation.targetPosition));
+                
+                // Update marble velocity
+                ecb.SetComponent(operation.marble, operation.targetVelocity);
+                
+                // Update physical position for smooth movement
+                var centerPosition = ECSUtils.CellIndexToPosition(operation.targetPosition);
+                ecb.SetComponent(operation.marble, new PositionComponent { Value = centerPosition });
+            }
+            
+            // Dispose the queue
+            liftOperationQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Job to process faults from lift operations
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessFaultsJob : IJob
+    {
+        public NativeQueue<Fault> faults;
+
+        public void Execute()
+        {
+            // Process faults
+            while (faults.TryDequeue(out var fault))
+            {
+                // Log or handle fault
+                // UnityEngine.Debug.LogWarning($"Lift system fault: {fault.Code}");
+            }
+            
+            // Dispose the fault queue
+            faults.Dispose();
+        }
+    }
+
+    /// <summary>
     /// System for managing lift marble loading and unloading
     /// This handles marbles entering and exiting lift platforms
     /// </summary>
@@ -187,15 +221,80 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct LiftLoadingSystem : ISystem
     {
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             // System requires lift entities to process
             state.RequireForUpdate<LiftState>();
+            
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
+        {
+            // Set up temporary containers
+            var loadingQueue = new NativeQueue<LiftLoadingOperation>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
+
+            // Get ECB for marble loading
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+
+            // Process lift loading in parallel
+            var processLoadingJob = new ProcessLoadingJob
+            {
+                loadingQueue = loadingQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb
+            };
+            var processHandle = processLoadingJob.ScheduleParallel(state.Dependency);
+
+            // Apply loading operations
+            var applyLoadingJob = new ApplyLoadingJob
+            {
+                loadingQueue = loadingQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyLoadingJob.Schedule(processHandle);
+
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(applyHandle);
+
+            // Set final dependency
+            state.Dependency = faultHandle;
+        }
+    }
+
+    /// <summary>
+    /// Represents a lift loading operation
+    /// </summary>
+    public struct LiftLoadingOperation
+    {
+        public Entity liftEntity;
+        public Entity marbleEntity;
+        public int3 loadingPosition;
+    }
+
+    /// <summary>
+    /// Job to process lift loading logic
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessLoadingJob : IJobEntity
+    {
+        public NativeQueue<LiftLoadingOperation>.ParallelWriter loadingQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
+        public EntityCommandBuffer.ParallelWriter ecb;
+
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           ref LiftState liftState, in CellIndex cellIndex)
         {
             // Handle marble loading onto lifts
             // This would detect when marbles reach lift loading positions
@@ -207,55 +306,36 @@ namespace MarbleMaker.Core.ECS
             // 3. Prepare them for vertical lifting
             // 4. Handle lift capacity and queuing
             
-            // Example implementation:
-            /*
-            foreach (var (liftState, cellIndex, entity) in 
-                SystemAPI.Query<RefRW<LiftState>, RefRO<CellIndex>>()
-                .WithEntityAccess())
-            {
-                // Check for marbles at lift loading position
-                var incomingMarbles = GetMarblesAtLiftLoading(cellIndex.ValueRO.xyz);
-                foreach (var marble in incomingMarbles)
-                {
-                    LoadMarbleOntoLift(entity, marble, liftState.ValueRW);
-                }
-            }
-            */
-        }
-
-        /// <summary>
-        /// Loads a marble onto a lift platform
-        /// </summary>
-        [BurstCompile]
-        private void LoadMarbleOntoLift(Entity liftEntity, Entity marbleEntity, RefRW<LiftState> liftState)
-        {
-            // In a full implementation, this would:
-            // 1. Stop the marble's horizontal movement
-            // 2. Position it on the lift platform
-            // 3. Mark it as being lifted
-            // 4. Update lift state if needed
-            
             // Placeholder implementation
-        }
-
-        /// <summary>
-        /// Gets marbles at lift loading positions
-        /// </summary>
-        [BurstCompile]
-        private NativeArray<Entity> GetMarblesAtLiftLoading(int3 liftPosition)
-        {
-            // In a full implementation, this would:
-            // 1. Query for marbles at the lift's loading position
-            // 2. Return all marbles ready to be loaded
-            
-            // Placeholder implementation
-            return new NativeArray<Entity>(0, Allocator.Temp);
         }
     }
 
     /// <summary>
-    /// System for managing lift initialization and configuration
-    /// This sets up lift parameters and target heights
+    /// Job to apply lift loading operations
+    /// </summary>
+    [BurstCompile]
+    public struct ApplyLoadingJob : IJob
+    {
+        public NativeQueue<LiftLoadingOperation> loadingQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all loading operations
+            while (loadingQueue.TryDequeue(out var operation))
+            {
+                // Apply loading operation
+                // This would position the marble on the lift platform
+                // For now, this is a placeholder
+            }
+            
+            // Dispose the queue
+            loadingQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// System for lift initialization and configuration
     /// </summary>
     [UpdateInGroup(typeof(ModuleLogicGroup))]
     [UpdateBefore(typeof(LiftLoadingSystem))]
@@ -272,27 +352,23 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Initialize lift parameters and handle configuration changes
-            // This would set up lift heights, speeds, and other parameters
-            
-            // Process lift configuration
+            // Initialize lift parameters
             foreach (var (liftState, entity) in 
                 SystemAPI.Query<RefRW<LiftState>>().WithEntityAccess())
             {
                 // Configure lift if not already configured
-                if (liftState.ValueRO.state.targetHeight == 0)
+                if (!liftState.ValueRO.isActive)
                 {
-                    // Set default target height (would be configured from ModuleRef)
-                    liftState.ValueRW.state.targetHeight = 5; // 5 cells high
-                    liftState.ValueRW.state.currentHeight = 0;
-                    liftState.ValueRW.state.isActive = false; // Start inactive
+                    // Set default lift parameters
+                    liftState.ValueRW.currentHeight = 0;
+                    liftState.ValueRW.targetHeight = 5; // Default target height
                 }
             }
         }
     }
 
     /// <summary>
-    /// Component to mark marbles being lifted
+    /// Component for marbles that are being lifted
     /// </summary>
     public struct LiftedMarble : IComponentData
     {

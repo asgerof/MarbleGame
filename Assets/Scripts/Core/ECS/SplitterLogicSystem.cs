@@ -17,11 +17,11 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct SplitterLogicSystem : ISystem
     {
-        private EntityArchetype marbleArchetype;
-        private bool archetypeInitialized;
-        private NativeList<Entity> marblesToRoute;
-        private NativeList<int3> routingDestinations;
-        private NativeList<int> routingExits;
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+        
+        // High water mark for capacity management
+        private static int _splitterRoutingHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -29,131 +29,87 @@ namespace MarbleMaker.Core.ECS
             // System requires splitter entities to process
             state.RequireForUpdate<SplitterState>();
             
-            // Initialize collections for marble routing
-            if (!marblesToRoute.IsCreated) marblesToRoute = new NativeList<Entity>(1000, Allocator.Persistent);
-            if (!routingDestinations.IsCreated) routingDestinations = new NativeList<int3>(1000, Allocator.Persistent);
-            if (!routingExits.IsCreated) routingExits = new NativeList<int>(1000, Allocator.Persistent);
-            archetypeInitialized = false;
-        }
-
-        [BurstCompile]
-        public void OnDestroy(ref SystemState state)
-        {
-            // Clean up native collections
-            if (marblesToRoute.IsCreated) marblesToRoute.Dispose();
-            if (routingDestinations.IsCreated) routingDestinations.Dispose();
-            if (routingExits.IsCreated) routingExits.Dispose();
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Initialize marble archetype if not done yet
-            if (!archetypeInitialized)
-            {
-                InitializeMarbleArchetype(ref state);
-                archetypeInitialized = true;
-            }
-
-            // Clear previous frame data
-            marblesToRoute.FastClear();
-            routingDestinations.FastClear();
-            routingExits.FastClear();
+            // Set up temporary containers for this frame
+            var routingQueue = new NativeQueue<SplitterRouting>(Allocator.TempJob);
+            var triggerRemovalQueue = new NativeQueue<TriggerRemoval>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
 
             // Get ECB for marble routing
-            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
-                .CreateCommandBuffer(state.WorldUnmanaged);
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
 
-            // Process splitters and route marbles
+            // Process splitters in parallel
             var processSplittersJob = new ProcessSplittersJob
             {
-                marblesToRoute = marblesToRoute,
-                routingDestinations = routingDestinations,
-                routingExits = routingExits,
-                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true),
-                ecb = ecb.AsParallelWriter()
+                routingQueue = routingQueue.AsParallelWriter(),
+                triggerRemovalQueue = triggerRemovalQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb,
+                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true)
             };
-
-            state.Dependency = processSplittersJob.ScheduleParallel(state.Dependency);
-            state.Dependency.Complete();
+            var processHandle = processSplittersJob.ScheduleParallel(state.Dependency);
 
             // Apply routing results
-            ApplyMarbleRouting(ecb);
-        }
-
-        /// <summary>
-        /// Initializes the marble archetype for spawning
-        /// </summary>
-        private void InitializeMarbleArchetype(ref SystemState state)
-        {
-            marbleArchetype = Archetypes.Marble;
-        }
-
-        /// <summary>
-        /// Applies marble routing by moving marbles to their destination outputs
-        /// </summary>
-        private void ApplyMarbleRouting(EntityCommandBuffer ecb)
-        {
-            for (int i = 0; i < marblesToRoute.Length; i++)
+            var applyRoutingJob = new ApplySplitterRoutingJob
             {
-                var marble = marblesToRoute[i];
-                var destination = routingDestinations[i];
-                var exit = routingExits[i];
+                routingQueue = routingQueue,
+                triggerRemovalQueue = triggerRemovalQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyRoutingJob.Schedule(processHandle);
 
-                // Route marble to output position
-                RouteMarbleToOutput(ecb, marble, destination, exit);
-            }
-        }
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(applyHandle);
 
-        /// <summary>
-        /// Routes a marble to the specified output
-        /// </summary>
-        [BurstCompile]
-        private void RouteMarbleToOutput(EntityCommandBuffer ecb, Entity marble, int3 outputPosition, int exitIndex)
-        {
-            // Update marble position to output
-            ecb.SetComponent(marble, new CellIndex(outputPosition));
-            
-            // Set initial velocity based on exit direction
-            var outputVelocity = CalculateOutputVelocity(exitIndex);
-            ecb.SetComponent(marble, outputVelocity);
-            
-            // Update position for smooth movement
-            var centerPosition = ECSUtils.CellIndexToPosition(outputPosition);
-            ecb.SetComponent(marble, centerPosition);
-        }
-
-        /// <summary>
-        /// Calculates output velocity based on exit index
-        /// </summary>
-        [BurstCompile]
-        private VelocityFP CalculateOutputVelocity(int exitIndex)
-        {
-            // Base velocity for marbles leaving splitter
-            float baseSpeed = 1.0f; // cells/second
-            
-            // Direction depends on exit index
-            // Exit 0: positive direction, Exit 1: negative direction (for 2-way splitter)
-            float direction = exitIndex == 0 ? 1.0f : -1.0f;
-            
-            return VelocityFP.FromFloat(baseSpeed * direction);
+            // Set final dependency
+            state.Dependency = faultHandle;
         }
     }
 
     /// <summary>
+    /// Represents a splitter routing operation
+    /// </summary>
+    public struct SplitterRouting
+    {
+        public Entity marble;
+        public Entity splitterEntity;
+        public int3 outputPosition;
+        public int exitIndex;
+        public VelocityComponent outputVelocity;
+    }
+
+    /// <summary>
+    /// Represents a trigger removal operation
+    /// </summary>
+    public struct TriggerRemoval
+    {
+        public Entity entity;
+    }
+
+    /// <summary>
     /// Job to process splitter logic and route marbles
-    /// From ECS docs: "Round-robin exit swap, unless ModuleState overridden by click"
     /// </summary>
     [BurstCompile]
     public struct ProcessSplittersJob : IJobEntity
     {
-        public NativeList<Entity> marblesToRoute;
-        public NativeList<int3> routingDestinations;
-        public NativeList<int> routingExits;
-        [ReadOnly] public ComponentLookup<InSplitterTrigger> triggerLookup;
+        public NativeQueue<SplitterRouting>.ParallelWriter routingQueue;
+        public NativeQueue<TriggerRemoval>.ParallelWriter triggerRemovalQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
         public EntityCommandBuffer.ParallelWriter ecb;
+        [ReadOnly] public ComponentLookup<InSplitterTrigger> triggerLookup;
 
-        public void Execute(Entity entity, ref SplitterState splitterState, in CellIndex cellIndex)
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           ref SplitterState splitterState, in CellIndex cellIndex)
         {
             // Check if there are marbles to route at this splitter
             var hasIncomingMarble = ShouldProcessSplitter(entity, cellIndex);
@@ -166,30 +122,38 @@ namespace MarbleMaker.Core.ECS
                 // Calculate output position based on exit
                 var outputPosition = CalculateOutputPosition(cellIndex.xyz, exitToUse);
                 
-                // Add to routing lists
-                var marbleEntity = GetMarbleAtSplitter(entity, cellIndex); // Placeholder
+                // Get marble at splitter (placeholder for now)
+                var marbleEntity = GetMarbleAtSplitter(entity, cellIndex);
                 if (marbleEntity != Entity.Null)
                 {
-                    marblesToRoute.Add(marbleEntity);
-                    routingDestinations.Add(outputPosition);
-                    routingExits.Add(exitToUse);
-                }
-                
-                // Remove the trigger tag after processing
-                ecb.RemoveComponent<InSplitterTrigger>(entity.Index, entity);
-                
-                // Update splitter state for next marble (if not overridden)
-                if (!splitterState.OverrideEnabled)
-                {
-                    // Toggle exit for round-robin behavior
-                    splitterState.NextLaneIndex = (byte)(splitterState.NextLaneIndex == 0 ? 1 : 0);
+                    // Queue routing operation
+                    routingQueue.Enqueue(new SplitterRouting
+                    {
+                        marble = marbleEntity,
+                        splitterEntity = entity,
+                        outputPosition = outputPosition,
+                        exitIndex = exitToUse,
+                        outputVelocity = CalculateOutputVelocity(exitToUse)
+                    });
+                    
+                    // Queue trigger removal (using correct ECB overload)
+                    triggerRemovalQueue.Enqueue(new TriggerRemoval
+                    {
+                        entity = entity
+                    });
+                    
+                    // Update splitter state for next marble (if not overridden)
+                    if (!splitterState.OverrideEnabled)
+                    {
+                        // Toggle exit for round-robin behavior
+                        splitterState.NextLaneIndex = (byte)(splitterState.NextLaneIndex == 0 ? 1 : 0);
+                    }
                 }
             }
         }
 
         /// <summary>
         /// Determines which exit to use based on splitter state
-        /// From GDD: "Round-robin exit swap, unless overridden by click"
         /// </summary>
         [BurstCompile]
         private int DetermineExitToUse(ref SplitterState state)
@@ -223,6 +187,22 @@ namespace MarbleMaker.Core.ECS
         }
 
         /// <summary>
+        /// Calculates output velocity based on exit index
+        /// </summary>
+        [BurstCompile]
+        private VelocityComponent CalculateOutputVelocity(int exitIndex)
+        {
+            // Base velocity for marbles leaving splitter
+            long baseSpeed = Fixed32.FromFloat(1.0f).Raw; // cells/second
+            
+            // Direction depends on exit index
+            // Exit 0: positive direction, Exit 1: negative direction (for 2-way splitter)
+            long direction = exitIndex == 0 ? baseSpeed : -baseSpeed;
+            
+            return new VelocityComponent { Value = new Fixed32x3(direction, 0, 0) };
+        }
+
+        /// <summary>
         /// Checks if this splitter should process a marble this tick
         /// </summary>
         [BurstCompile]
@@ -247,62 +227,174 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
+    /// Job to apply splitter routing results
+    /// </summary>
+    [BurstCompile]
+    public struct ApplySplitterRoutingJob : IJob
+    {
+        public NativeQueue<SplitterRouting> routingQueue;
+        public NativeQueue<TriggerRemoval> triggerRemovalQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all routing operations
+            while (routingQueue.TryDequeue(out var routing))
+            {
+                // Route marble to output position
+                ecb.SetComponent(routing.marble, new CellIndex(routing.outputPosition));
+                
+                // Set initial velocity based on exit direction
+                ecb.SetComponent(routing.marble, routing.outputVelocity);
+                
+                // Update position for smooth movement
+                var centerPosition = ECSUtils.CellIndexToPosition(routing.outputPosition);
+                ecb.SetComponent(routing.marble, new PositionComponent { Value = centerPosition });
+            }
+            
+            // Process trigger removals using correct ECB overload
+            while (triggerRemovalQueue.TryDequeue(out var removal))
+            {
+                ecb.RemoveComponent<InSplitterTrigger>(removal.entity);
+            }
+            
+            // Dispose queues
+            routingQueue.Dispose();
+            triggerRemovalQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Job to process faults from splitter operations
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessFaultsJob : IJob
+    {
+        public NativeQueue<Fault> faults;
+
+        public void Execute()
+        {
+            // Process faults
+            while (faults.TryDequeue(out var fault))
+            {
+                // Log or handle fault
+                // UnityEngine.Debug.LogWarning($"Splitter system fault: {fault.Code}");
+            }
+            
+            // Dispose the fault queue
+            faults.Dispose();
+        }
+    }
+
+    /// <summary>
     /// System for managing splitter input detection
-    /// This detects when marbles reach splitter inputs and triggers routing
+    /// This detects when marbles reach splitter inputs
     /// </summary>
     [UpdateInGroup(typeof(ModuleLogicGroup))]
     [UpdateBefore(typeof(SplitterLogicSystem))]
     [BurstCompile]
     public partial struct SplitterInputDetectionSystem : ISystem
     {
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             // System requires marble entities to process
             state.RequireForUpdate<MarbleTag>();
+            
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Detect marbles that have reached splitter inputs
-            // This would query for marbles at splitter input positions
-            // and mark them for routing by the SplitterLogicSystem
-            
-            // In a full implementation, this would:
-            // 1. Query all marbles and their positions
-            // 2. Check if any marble is at a splitter input position
-            // 3. Add routing components or flags to trigger splitter processing
-            
-            // Example implementation:
-            /*
-            foreach (var (marblePos, marbleEntity) in 
-                SystemAPI.Query<RefRO<CellIndex>>().WithEntityAccess().WithAll<MarbleTag>())
+            // Set up temporary containers
+            var inputDetectionQueue = new NativeQueue<SplitterInputDetection>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
+
+            // Get ECB for input detection
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+
+            // Detect marbles at splitter inputs in parallel
+            var detectInputsJob = new DetectSplitterInputsJob
             {
-                // Check if marble is at a splitter input
-                var splitterEntity = GetSplitterAtPosition(marblePos.ValueRO.xyz);
-                if (splitterEntity != Entity.Null)
+                inputDetectionQueue = inputDetectionQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb
+            };
+            var detectHandle = detectInputsJob.ScheduleParallel(state.Dependency);
+
+            // Apply input detections
+            var applyInputDetectionsJob = new ApplyInputDetectionsJob
+            {
+                inputDetectionQueue = inputDetectionQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyInputDetectionsJob.Schedule(detectHandle);
+
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(applyHandle);
+
+            // Set final dependency
+            state.Dependency = faultHandle;
+        }
+    }
+
+    /// <summary>
+    /// Represents a splitter input detection event
+    /// </summary>
+    public struct SplitterInputDetection
+    {
+        public Entity marble;
+        public Entity splitterEntity;
+        public int3 inputPosition;
+        public long arrivalTick;
+    }
+
+    /// <summary>
+    /// Job to detect marbles at splitter inputs
+    /// </summary>
+    [BurstCompile]
+    public struct DetectSplitterInputsJob : IJobEntity
+    {
+        public NativeQueue<SplitterInputDetection>.ParallelWriter inputDetectionQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
+        public EntityCommandBuffer.ParallelWriter ecb;
+
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           in CellIndex cellIndex, in PositionComponent position, in MarbleTag marbleTag)
+        {
+            // Check if marble is at a splitter input position
+            var splitterAtPosition = GetSplitterAtPosition(cellIndex.xyz);
+            
+            if (splitterAtPosition != Entity.Null)
+            {
+                // Queue input detection
+                inputDetectionQueue.Enqueue(new SplitterInputDetection
                 {
-                    // Mark marble for routing
-                    var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
-                        .CreateCommandBuffer(state.WorldUnmanaged);
-                    ecb.AddComponent<PendingSplitterRouting>(marbleEntity, new PendingSplitterRouting 
-                    { 
-                        splitterEntity = splitterEntity 
-                    });
-                }
+                    marble = entity,
+                    splitterEntity = splitterAtPosition,
+                    inputPosition = cellIndex.xyz,
+                    arrivalTick = (long)SimulationTick.Current
+                });
             }
-            */
         }
 
         /// <summary>
-        /// Gets the splitter entity at a given position
+        /// Gets the splitter at the specified position
         /// </summary>
         [BurstCompile]
         private Entity GetSplitterAtPosition(int3 position)
         {
             // In a full implementation, this would:
-            // 1. Query for splitter entities at the given position
+            // 1. Query for splitter entities at the specified position
             // 2. Return the splitter entity if found
             
             // Placeholder implementation
@@ -311,7 +403,37 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Component to mark marbles pending splitter routing
+    /// Job to apply splitter input detections
+    /// </summary>
+    [BurstCompile]
+    public struct ApplyInputDetectionsJob : IJob
+    {
+        public NativeQueue<SplitterInputDetection> inputDetectionQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all input detections
+            while (inputDetectionQueue.TryDequeue(out var detection))
+            {
+                // Add trigger component to mark splitter for processing
+                ecb.AddComponent<InSplitterTrigger>(detection.splitterEntity);
+                
+                // Add pending routing component to marble
+                ecb.AddComponent<PendingSplitterRouting>(detection.marble, new PendingSplitterRouting
+                {
+                    splitterEntity = detection.splitterEntity,
+                    routingTick = detection.arrivalTick
+                });
+            }
+            
+            // Dispose the queue
+            inputDetectionQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Component for pending splitter routing
     /// </summary>
     public struct PendingSplitterRouting : IComponentData
     {

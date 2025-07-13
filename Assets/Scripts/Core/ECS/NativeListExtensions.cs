@@ -10,17 +10,14 @@ namespace MarbleMaker.Core.ECS
     public static class NativeListExtensions
     {
         /// <summary>
-        /// Fast clears a NativeList by only setting Length to 0, keeping capacity
-        /// This is more efficient than Clear() as it doesn't deallocate memory
+        /// O(1) length-reset without zero-filling.
+        /// Burst treats Length = 0 as a constant-time op; no memory touch.
         /// </summary>
         [BurstCompile]
         public static void FastClear<T>(this NativeList<T> list)
             where T : unmanaged
         {
-#if UNITY_EDITOR
-            Assert.AreEqual(Allocator.Persistent, list.Allocator);
-#endif
-            list.Length = 0;          // keeps capacity
+            list.Length = 0;
         }
     }
 }

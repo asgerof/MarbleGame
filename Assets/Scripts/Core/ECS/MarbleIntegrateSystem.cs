@@ -9,18 +9,19 @@ namespace MarbleMaker.Core.ECS
 {
     /// <summary>
     /// Integrates marble physics using fixed-point arithmetic
-    /// From ECS docs: "MarbleIntegrateSystem (ScheduleParallel) • ForEach(TranslationFP, VelocityFP, AccelerationFP) • v += a * Δ; clamp; p += v * Δ • Writes new CellIndex when crossing grid border"
+    /// From ECS docs: "MarbleIntegrateSystem (ScheduleParallel) • ForEach(PositionComponent, VelocityComponent, AccelerationComponent) • v += a * Δ; clamp; p += v * Δ • Writes new CellIndex when crossing grid border"
     /// Performance target: "10 000 marbles → 5.2 ms / tick (4 cores, 120 Hz)"
     /// </summary>
     [UpdateInGroup(typeof(MotionGroup))]
     [BurstCompile]
     public partial struct MarbleIntegrateSystem : ISystem
     {
-        // Fixed-point constants for deterministic physics
-        private static readonly long TERMINAL_SPEED_FP = Fixed32.FromFloat(5.0f).Raw; // 5.0 in Q32.32 format
-        private static readonly long GRAVITY_ACCEL_FP = Fixed32.FromFloat(0.1f).Raw; // 0.1 in Q32.32 format
-        private static readonly long FRICTION_ACCEL_FP = Fixed32.FromFloat(-0.05f).Raw; // -0.05 in Q32.32 format
-        private static readonly long CELL_SIZE_FP = Fixed32.ONE.Raw; // 1.0 in Q32.32 format
+        // Fixed-point constants for deterministic physics (Q32.32 format)
+        private static readonly long TERMINAL_SPEED_FP = Fixed32.FromFloat(5.0f).Raw;
+        private static readonly long GRAVITY_ACCEL_FP = Fixed32.FromFloat(0.1f).Raw;
+        private static readonly long FRICTION_ACCEL_FP = Fixed32.FromFloat(-0.05f).Raw;
+        private static readonly long CELL_SIZE_FP = Fixed32.ONE.Raw; // 1.0 cell in Q32.32
+        private static readonly long DELTA_TIME_FP = Fixed32.TickDuration.Raw;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -36,7 +37,7 @@ namespace MarbleMaker.Core.ECS
             // Note: Acceleration is now calculated by ModulatedAccelerationSystem
             var marbleIntegrateJob = new MarbleIntegrateJob
             {
-                deltaTime = Fixed32.TickDuration.Raw,
+                deltaTime = DELTA_TIME_FP,
                 terminalSpeed = TERMINAL_SPEED_FP,
                 cellSize = CELL_SIZE_FP
             };
@@ -61,28 +62,43 @@ namespace MarbleMaker.Core.ECS
         public void Execute(ref PositionComponent position, ref VelocityComponent velocity, 
                           in AccelerationComponent acceleration, ref CellIndex cellIndex)
         {
-            // Step 1: Integrate velocity: v += a * Δt
-            // Acceleration is already calculated by ModulatedAccelerationSystem
-            velocity.Value = velocity.Value + acceleration.Value * deltaTime;
+            // Step 1: Integrate velocity: v += a * Δt (pure fixed-point math)
+            velocity.Value.x += FixedPoint.Mul(acceleration.Value.x, deltaTime);
+            velocity.Value.y += FixedPoint.Mul(acceleration.Value.y, deltaTime);
+            velocity.Value.z += FixedPoint.Mul(acceleration.Value.z, deltaTime);
 
-            // Step 2: Clamp velocity to terminal speed using math.clamp
+            // Step 2: Clamp velocity to terminal speed using pure integer math
             velocity.Value.x = math.clamp(velocity.Value.x, -terminalSpeed, terminalSpeed);
             velocity.Value.y = math.clamp(velocity.Value.y, -terminalSpeed, terminalSpeed);
             velocity.Value.z = math.clamp(velocity.Value.z, -terminalSpeed, terminalSpeed);
 
-            // Step 3: Integrate position: p += v * Δt
-            position.Value = position.Value + velocity.Value * deltaTime;
+            // Step 3: Integrate position: p += v * Δt (pure fixed-point math)
+            position.Value.x += FixedPoint.Mul(velocity.Value.x, deltaTime);
+            position.Value.y += FixedPoint.Mul(velocity.Value.y, deltaTime);
+            position.Value.z += FixedPoint.Mul(velocity.Value.z, deltaTime);
 
-            // Step 4: Update CellIndex when crossing grid border using pure integer math
-            var newCellIndex = ECSUtils.PositionToCellIndex(position.Value, cellSize);
+            // Step 4: Update CellIndex when crossing grid border using pure integer division
+            var newCellIndex = CalculateCellIndex(position.Value, cellSize);
             if (!newCellIndex.Equals(cellIndex.xyz))
             {
                 cellIndex.xyz = newCellIndex;
             }
         }
 
-
+        /// <summary>
+        /// Calculates cell index using pure integer division of Q32.32 values
+        /// Eliminates float conversion to maintain determinism
+        /// </summary>
+        [BurstCompile]
+        private int3 CalculateCellIndex(in Fixed32x3 position, long cellSize)
+        {
+            // Use integer division of raw Q32.32 values
+            // This replaces math.floor(pos.ToFloat() * ONE_OVER_CELL) with pure integer math
+            return new int3(
+                (int)(position.x / cellSize),
+                (int)(position.y / cellSize),
+                (int)(position.z / cellSize)
+            );
+        }
     }
-
-
 }

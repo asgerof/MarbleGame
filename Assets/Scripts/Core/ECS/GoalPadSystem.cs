@@ -16,9 +16,11 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct GoalPadSystem : ISystem
     {
-        private NativeList<Entity> marblesToDestroy;
-        private NativeList<int> coinRewards;
-        private NativeList<Entity> goalPadsToUpdate;
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+        
+        // High water mark for capacity management
+        private static int _goalCollectionHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -26,125 +28,92 @@ namespace MarbleMaker.Core.ECS
             // System requires goal pad entities to process
             state.RequireForUpdate<GoalPad>();
             
-            // Initialize collections for marble collection
-            int initialCapacity = 1024;
-            int expectedPeak = 10000; // from design doc
-            
-            if (!marblesToDestroy.IsCreated) 
-            {
-                marblesToDestroy = new NativeList<Entity>(initialCapacity, Allocator.Persistent);
-                marblesToDestroy.Capacity = math.max(marblesToDestroy.Capacity, expectedPeak);
-            }
-            if (!coinRewards.IsCreated) 
-            {
-                coinRewards = new NativeList<int>(initialCapacity, Allocator.Persistent);
-                coinRewards.Capacity = math.max(coinRewards.Capacity, expectedPeak);
-            }
-            if (!goalPadsToUpdate.IsCreated) 
-            {
-                goalPadsToUpdate = new NativeList<Entity>(100, Allocator.Persistent);
-                goalPadsToUpdate.Capacity = math.max(goalPadsToUpdate.Capacity, 500);
-            }
-        }
-
-        [BurstCompile]
-        public void OnDestroy(ref SystemState state)
-        {
-            // Clean up native collections
-            if (marblesToDestroy.IsCreated) marblesToDestroy.Dispose();
-            if (coinRewards.IsCreated) coinRewards.Dispose();
-            if (goalPadsToUpdate.IsCreated) goalPadsToUpdate.Dispose();
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Clear previous frame data
-            marblesToDestroy.FastClear();
-            coinRewards.FastClear();
-            goalPadsToUpdate.FastClear();
+            // Set up temporary containers for this frame
+            var goalCollectionQueue = new NativeQueue<GoalCollection>(Allocator.TempJob);
+            var coinAwardQueue = new NativeQueue<CoinAward>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
 
             // Get ECB for marble destruction
-            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
-                .CreateCommandBuffer(state.WorldUnmanaged);
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
 
-            // Process goal pads and collect marbles
+            // Process goal pads in parallel
             var processGoalPadsJob = new ProcessGoalPadsJob
             {
-                marblesToDestroy = marblesToDestroy,
-                coinRewards = coinRewards,
-                goalPadsToUpdate = goalPadsToUpdate
+                goalCollectionQueue = goalCollectionQueue.AsParallelWriter(),
+                coinAwardQueue = coinAwardQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb
             };
+            var processHandle = processGoalPadsJob.ScheduleParallel(state.Dependency);
 
-            state.Dependency = processGoalPadsJob.ScheduleParallel(state.Dependency);
-            state.Dependency.Complete();
-
-            // Apply marble collection results
-            ApplyMarbleCollection(ecb);
-        }
-
-        /// <summary>
-        /// Applies marble collection by destroying marbles and awarding coins
-        /// </summary>
-        private void ApplyMarbleCollection(EntityCommandBuffer ecb)
-        {
-            // Destroy collected marbles
-            for (int i = 0; i < marblesToDestroy.Length; i++)
+            // Apply goal collections
+            var applyGoalCollectionsJob = new ApplyGoalCollectionsJob
             {
-                var marble = marblesToDestroy[i];
-                var coinReward = coinRewards[i];
+                goalCollectionQueue = goalCollectionQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyGoalCollectionsJob.Schedule(processHandle);
 
-                // Destroy the marble
-                ecb.DestroyEntity(marble);
+            // Process coin awards
+            var processCoinAwardsJob = new ProcessCoinAwardsJob
+            {
+                coinAwardQueue = coinAwardQueue
+            };
+            var coinHandle = processCoinAwardsJob.Schedule(applyHandle);
 
-                // Award coins (would be sent to economy system)
-                AwardCoins(coinReward);
-            }
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(coinHandle);
 
-            // Update goal pad collection counts
-            UpdateGoalPadStats();
-        }
-
-        /// <summary>
-        /// Awards coins for marble collection
-        /// </summary>
-        private void AwardCoins(int coinAmount)
-        {
-            // In a full implementation, this would:
-            // 1. Send coin award event to economy system
-            // 2. Update player's coin balance
-            // 3. Trigger UI updates for coin display
-            
-            // Placeholder implementation
-            // UIBus.PublishCoinAwarded(coinAmount);
-        }
-
-        /// <summary>
-        /// Updates goal pad statistics
-        /// </summary>
-        private void UpdateGoalPadStats()
-        {
-            // In a full implementation, this would:
-            // 1. Update marble collection counts on goal pads
-            // 2. Check for puzzle completion criteria
-            // 3. Update progress tracking
-            
-            // Placeholder implementation
+            // Set final dependency
+            state.Dependency = faultHandle;
         }
     }
 
     /// <summary>
+    /// Represents a goal collection event
+    /// </summary>
+    public struct GoalCollection
+    {
+        public Entity goalEntity;
+        public Entity marble;
+        public int3 goalPosition;
+        public int coinReward;
+    }
+
+    /// <summary>
+    /// Represents a coin award event
+    /// </summary>
+    public struct CoinAward
+    {
+        public int amount;
+        public Entity goalEntity;
+        public long awardTick;
+    }
+
+    /// <summary>
     /// Job to process goal pad logic and collect marbles
-    /// From marble lifecycle: "EntityManager.DestroyEntity(marble); optionally award Coins"
     /// </summary>
     [BurstCompile]
     public struct ProcessGoalPadsJob : IJobEntity
     {
-        public NativeList<Entity> marblesToDestroy;
-        public NativeList<int> coinRewards;
-        public NativeList<Entity> goalPadsToUpdate;
+        public NativeQueue<GoalCollection>.ParallelWriter goalCollectionQueue;
+        public NativeQueue<CoinAward>.ParallelWriter coinAwardQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
+        public EntityCommandBuffer.ParallelWriter ecb;
 
-        public void Execute(Entity entity, ref GoalPad goalPad, in CellIndex cellIndex)
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           ref GoalPad goalPad, in CellIndex cellIndex)
         {
             // Check for marbles at this goal pad position
             var marblesAtGoal = GetMarblesAtGoalPosition(goalPad.goalPosition);
@@ -154,13 +123,25 @@ namespace MarbleMaker.Core.ECS
                 var marble = marblesAtGoal[i];
                 if (marble != Entity.Null)
                 {
-                    // Collect the marble
-                    marblesToDestroy.Add(marble);
-                    coinRewards.Add(goalPad.coinReward);
+                    // Queue goal collection
+                    goalCollectionQueue.Enqueue(new GoalCollection
+                    {
+                        goalEntity = entity,
+                        marble = marble,
+                        goalPosition = goalPad.goalPosition,
+                        coinReward = goalPad.coinReward
+                    });
+                    
+                    // Queue coin award
+                    coinAwardQueue.Enqueue(new CoinAward
+                    {
+                        amount = goalPad.coinReward,
+                        goalEntity = entity,
+                        awardTick = (long)SimulationTick.Current
+                    });
                     
                     // Update goal pad stats
                     goalPad.marblesCollected++;
-                    goalPadsToUpdate.Add(entity);
                 }
             }
 
@@ -181,6 +162,91 @@ namespace MarbleMaker.Core.ECS
             
             // Placeholder implementation
             return new NativeArray<Entity>(0, Allocator.Temp);
+        }
+    }
+
+    /// <summary>
+    /// Job to apply goal collections
+    /// </summary>
+    [BurstCompile]
+    public struct ApplyGoalCollectionsJob : IJob
+    {
+        public NativeQueue<GoalCollection> goalCollectionQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all goal collections
+            while (goalCollectionQueue.TryDequeue(out var collection))
+            {
+                // Destroy the marble
+                ecb.DestroyEntity(collection.marble);
+                
+                // Update goal pad statistics would be handled by another system
+                // For now, we just destroy the marble
+            }
+            
+            // Dispose the queue
+            goalCollectionQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Job to process coin awards
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessCoinAwardsJob : IJob
+    {
+        public NativeQueue<CoinAward> coinAwardQueue;
+
+        public void Execute()
+        {
+            // Process all coin awards
+            while (coinAwardQueue.TryDequeue(out var award))
+            {
+                // Award coins (would be sent to economy system)
+                AwardCoins(award.amount, award.goalEntity);
+            }
+            
+            // Dispose the queue
+            coinAwardQueue.Dispose();
+        }
+
+        /// <summary>
+        /// Awards coins for marble collection
+        /// </summary>
+        [BurstCompile]
+        private void AwardCoins(int coinAmount, Entity goalEntity)
+        {
+            // In a full implementation, this would:
+            // 1. Send coin award event to economy system
+            // 2. Update player's coin balance
+            // 3. Trigger UI updates for coin display
+            
+            // Placeholder implementation
+            // UIBus.PublishCoinAwarded(coinAmount);
+        }
+    }
+
+    /// <summary>
+    /// Job to process faults from goal operations
+    /// </summary>
+    [BurstCompile]
+    public struct ProcessFaultsJob : IJob
+    {
+        public NativeQueue<Fault> faults;
+
+        public void Execute()
+        {
+            // Process faults
+            while (faults.TryDequeue(out var fault))
+            {
+                // Log or handle fault
+                // UnityEngine.Debug.LogWarning($"Goal system fault: {fault.Code}");
+            }
+            
+            // Dispose the fault queue
+            faults.Dispose();
         }
     }
 
@@ -227,56 +293,106 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct GoalDetectionSystem : ISystem
     {
+        // ECB system reference
+        private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
+
         [BurstCompile]
         public void OnCreate(ref SystemState state)
         {
             // System requires marble entities to process
             state.RequireForUpdate<MarbleTag>();
+            
+            // Initialize ECB system reference
+            _endSim = state.World.GetOrCreateSystemManaged<EndFixedStepSimulationEntityCommandBufferSystem>();
         }
 
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
-            // Detect marbles that have reached goal positions
-            // This would query for marbles at goal positions
-            // and mark them for collection by the GoalPadSystem
-            
-            // In a full implementation, this would:
-            // 1. Query all marbles and their positions
-            // 2. Check if any marble is at a goal position
-            // 3. Add collection components or flags to trigger goal processing
-            
-            // Example implementation:
-            /*
-            var ecb = SystemAPI.GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>()
-                .CreateCommandBuffer(state.WorldUnmanaged);
+            // Set up temporary containers
+            var goalDetectionQueue = new NativeQueue<GoalDetection>(Allocator.TempJob);
+            var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
 
-            foreach (var (marblePos, marbleEntity) in 
-                SystemAPI.Query<RefRO<CellIndex>>().WithEntityAccess().WithAll<MarbleTag>())
+            // Get ECB for goal detection
+            var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+
+            // Detect marbles at goal positions in parallel
+            var detectGoalsJob = new DetectGoalsJob
             {
-                // Check if marble is at a goal position
-                var goalEntity = GetGoalAtPosition(marblePos.ValueRO.xyz);
-                if (goalEntity != Entity.Null)
+                goalDetectionQueue = goalDetectionQueue.AsParallelWriter(),
+                faultQueue = faultQueue.AsParallelWriter(),
+                ecb = ecb
+            };
+            var detectHandle = detectGoalsJob.ScheduleParallel(state.Dependency);
+
+            // Apply goal detections
+            var applyGoalDetectionsJob = new ApplyGoalDetectionsJob
+            {
+                goalDetectionQueue = goalDetectionQueue,
+                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+            };
+            var applyHandle = applyGoalDetectionsJob.Schedule(detectHandle);
+
+            // Process faults
+            var processFaultsJob = new ProcessFaultsJob
+            {
+                faults = faultQueue
+            };
+            var faultHandle = processFaultsJob.Schedule(applyHandle);
+
+            // Set final dependency
+            state.Dependency = faultHandle;
+        }
+    }
+
+    /// <summary>
+    /// Represents a goal detection event
+    /// </summary>
+    public struct GoalDetection
+    {
+        public Entity marble;
+        public Entity goalEntity;
+        public int3 goalPosition;
+        public long arrivalTick;
+    }
+
+    /// <summary>
+    /// Job to detect marbles at goal positions
+    /// </summary>
+    [BurstCompile]
+    public struct DetectGoalsJob : IJobEntity
+    {
+        public NativeQueue<GoalDetection>.ParallelWriter goalDetectionQueue;
+        public NativeQueue<Fault>.ParallelWriter faultQueue;
+        public EntityCommandBuffer.ParallelWriter ecb;
+
+        public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
+                           in CellIndex cellIndex, in PositionComponent position, in MarbleTag marbleTag)
+        {
+            // Check if marble is at a goal position
+            var goalAtPosition = GetGoalAtPosition(cellIndex.xyz);
+            
+            if (goalAtPosition != Entity.Null)
+            {
+                // Queue goal detection
+                goalDetectionQueue.Enqueue(new GoalDetection
                 {
-                    // Mark marble for collection
-                    ecb.AddComponent<PendingGoalCollection>(marbleEntity, new PendingGoalCollection 
-                    { 
-                        goalEntity = goalEntity,
-                        arrivalTick = (long)SimulationTick.Current
-                    });
-                }
+                    marble = entity,
+                    goalEntity = goalAtPosition,
+                    goalPosition = cellIndex.xyz,
+                    arrivalTick = (long)SimulationTick.Current
+                });
             }
-            */
         }
 
         /// <summary>
-        /// Gets the goal entity at a given position
+        /// Gets the goal at the specified position
         /// </summary>
         [BurstCompile]
         private Entity GetGoalAtPosition(int3 position)
         {
             // In a full implementation, this would:
-            // 1. Query for goal entities at the given position
+            // 1. Query for goal entities at the specified position
             // 2. Return the goal entity if found
             
             // Placeholder implementation
@@ -285,7 +401,34 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Component to mark marbles pending goal collection
+    /// Job to apply goal detections
+    /// </summary>
+    [BurstCompile]
+    public struct ApplyGoalDetectionsJob : IJob
+    {
+        public NativeQueue<GoalDetection> goalDetectionQueue;
+        public EntityCommandBuffer ecb;
+
+        public void Execute()
+        {
+            // Process all goal detections
+            while (goalDetectionQueue.TryDequeue(out var detection))
+            {
+                // Add pending goal collection component
+                ecb.AddComponent<PendingGoalCollection>(detection.marble, new PendingGoalCollection
+                {
+                    goalEntity = detection.goalEntity,
+                    arrivalTick = detection.arrivalTick
+                });
+            }
+            
+            // Dispose the queue
+            goalDetectionQueue.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Component for pending goal collection
     /// </summary>
     public struct PendingGoalCollection : IComponentData
     {
@@ -315,7 +458,7 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Enum for different goal types
+    /// Enumeration of goal types
     /// </summary>
     public enum GoalType : byte
     {

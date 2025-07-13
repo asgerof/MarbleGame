@@ -7,7 +7,7 @@ namespace MarbleMaker.Core.ECS
 {
     /// <summary>
     /// Fixed-point position component (Q32.32 fixed-point)
-    /// From ECS docs: "TranslationFP, VelocityFP, AccelerationFP, CellIndex, MarbleTag (32 B aligned)"
+    /// From ECS docs: "PositionComponent, VelocityComponent, AccelerationComponent, CellIndex, MarbleTag (32 B aligned)"
     /// </summary>
     public struct PositionComponent : IComponentData
     {

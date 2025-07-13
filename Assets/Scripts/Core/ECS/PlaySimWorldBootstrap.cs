@@ -1,26 +1,73 @@
 using Unity.Entities;
+using UnityEngine;
 
-[DisableAutoCreation]
-public partial class EndSimulationEcbSystem : EntityCommandBufferSystem { }
-
-[WorldSystemFilter(WorldSystemFilterFlags.Simulation)]
-public class PlaySimWorldBootstrap : ICustomBootstrap
+namespace MarbleMaker.Core.ECS
 {
-    public bool Initialize(string defaultWorldName)
+    [DisableAutoCreation]
+    public partial class EndSimulationEcbSystem : EntityCommandBufferSystem { }
+
+    #if UNITY_EDITOR
+    [UnityEditor.InitializeOnLoad]
+    #endif
+    [WorldSystemFilter(WorldSystemFilterFlags.Simulation)]
+    public class PlaySimWorldBootstrap : ICustomBootstrap
     {
-        var world = new World(defaultWorldName);
-        World.DefaultGameObjectInjectionWorld = world;
+        static World _playWorld;
 
-        world.GetOrCreateSystemManaged<EndSimulationEcbSystem>();
-        
-        // Initialize shared archetypes
-        var entityManager = world.EntityManager;
-        Archetypes.Initialize(entityManager);
-        
-        // Finalize world initialization
-        world.GetOrCreateSystemManaged<SimulationSystemGroup>();
+        public bool Initialize(string defaultWorldName)
+        {
+            // Create custom play simulation world
+            _playWorld = new World("PlaySim");
+            World.DefaultGameObjectInjectionWorld = _playWorld;
 
-        ScriptBehaviourUpdateOrder.AddWorldToCurrentPlayerLoop(world);
-        return true;
+            // Add ECB system for end simulation
+            _playWorld.GetOrCreateSystemManaged<EndSimulationEcbSystem>();
+            
+            // Initialize shared archetypes
+            var entityManager = _playWorld.EntityManager;
+            Archetypes.Initialize(entityManager);
+            
+            // Create simulation system group
+            _playWorld.GetOrCreateSystemManaged<SimulationSystemGroup>();
+
+            // Add world to player loop
+            ScriptBehaviourUpdateOrder.AddWorldToCurrentPlayerLoop(_playWorld);
+            
+            // Return false to prevent default world creation
+            return false;
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void OnUnload()
+        {
+            // Clean up world on unload
+            if (_playWorld != null && _playWorld.IsCreated)
+            {
+                _playWorld.Dispose();
+                _playWorld = null;
+            }
+            
+            // Reset archetypes
+            Archetypes.Reset();
+        }
+
+        #if UNITY_EDITOR
+        [UnityEditor.InitializeOnPlayModeStateChanged]
+        static void OnPlayModeStateChanged(UnityEditor.PlayModeStateChange state)
+        {
+            if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+            {
+                // Clean up world when exiting play mode
+                if (_playWorld != null && _playWorld.IsCreated)
+                {
+                    _playWorld.Dispose();
+                    _playWorld = null;
+                }
+                
+                // Reset archetypes
+                Archetypes.Reset();
+            }
+        }
+        #endif
     }
 } 
