@@ -26,6 +26,10 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            // Run only inside the primary Game/Simulation world
+            if ((state.WorldUnmanaged.Flags & WorldFlags.Game) == 0)
+                return;
+
             void RecordDuplicate(in ulong key, byte type)   // 0 = Splitter, 1 = Lift
             {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
@@ -47,6 +51,19 @@ namespace MarbleMaker.Core.ECS
                 ECSLookups.GoalsByCell.Clear();
                 ECSLookups.MarblesByCell.Clear();
             }
+
+            // ------------------------------------------------------------------
+            // 1b. Ensure capacities match this frame's entity counts
+            // ------------------------------------------------------------------
+            int splitterCount = SystemAPI.QueryBuilder().WithAll<CellIndex, SplitterState>().CalculateEntityCount();
+            int liftCount     = SystemAPI.QueryBuilder().WithAll<CellIndex, LiftState>().CalculateEntityCount();
+            int goalCount     = SystemAPI.QueryBuilder().WithAll<CellIndex, GoalPad>().CalculateEntityCount();
+            int marbleCount   = SystemAPI.QueryBuilder().WithAll<CellIndex, MarbleTag>().CalculateEntityCount();
+
+            ECSLookups.SplittersByCell.EnsureCapacity(splitterCount);
+            ECSLookups.LiftsByCell.EnsureCapacity(liftCount);
+            ECSLookups.GoalsByCell.EnsureCapacity(goalCount);
+            ECSLookups.MarblesByCell.EnsureCapacity(marbleCount);
 
             // ------------------------------------------------------------------
             // 2. Schedule population passes (run in parallel)

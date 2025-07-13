@@ -315,9 +315,6 @@ namespace MarbleMaker.Core.ECS
                 // This would position the marble on the lift platform
                 // For now, this is a placeholder
             }
-            
-            // Dispose the queue
-            loadingQueue.Dispose();
         }
     }
 

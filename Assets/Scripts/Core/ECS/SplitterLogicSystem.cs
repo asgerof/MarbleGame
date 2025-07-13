@@ -44,13 +44,16 @@ namespace MarbleMaker.Core.ECS
             cellLookupRO.Update(ref state);          // Mandatory safety call
 
             // Process splitters in parallel
+            var triggerLookupRO = SystemAPI.GetComponentLookup<InSplitterTrigger>(true);
+            triggerLookupRO.Update(ref state);                       // NEW — mandatory safety call
+
             var processSplittersJob = new ProcessSplittersJob
             {
                 routingQueue = routingQueue.AsParallelWriter(),
                 triggerRemovalQueue = triggerRemovalQueue.AsParallelWriter(),
                 faultQueue = faultQueue.AsParallelWriter(),
                 ecb = ecb,
-                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true),
+                triggerLookup = triggerLookupRO,
                 cellLookup = cellLookupRO
             };
             var processHandle = processSplittersJob.ScheduleParallel(state.Dependency);
@@ -116,7 +119,7 @@ namespace MarbleMaker.Core.ECS
                            ref SplitterState splitterState, in CellIndex cellIndex)
         {
             // Check if there are marbles to route at this splitter
-            var hasIncomingMarble = ShouldProcessSplitter(entity, cellIndex);
+            var hasIncomingMarble = ShouldProcessSplitter(entity);
             
             if (hasIncomingMarble)
             {
@@ -209,7 +212,7 @@ namespace MarbleMaker.Core.ECS
         /// Checks if this splitter should process a marble this tick
         /// </summary>
         [BurstCompile]
-        private bool ShouldProcessSplitter(Entity splitterEntity, CellIndex cellIndex)
+        private bool ShouldProcessSplitter(Entity splitterEntity)
         {
             return triggerLookup.HasComponent(splitterEntity);
         }
@@ -396,9 +399,6 @@ namespace MarbleMaker.Core.ECS
                     routingTick = detection.arrivalTick
                 });
             }
-            
-            // Dispose the queue
-            inputDetectionQueue.Dispose();
         }
     }
 
