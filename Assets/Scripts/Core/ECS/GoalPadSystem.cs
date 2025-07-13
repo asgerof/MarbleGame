@@ -81,8 +81,11 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(coinHandle);
 
-            // Set final dependency
+            // Set final dependency and dispose queues
             state.Dependency = faultHandle;
+            state.Dependency = goalCollectionQueue.Dispose(state.Dependency);
+            state.Dependency = coinAwardQueue.Dispose(state.Dependency);
+            state.Dependency = faultQueue.Dispose(state.Dependency);
         }
     }
 
@@ -108,7 +111,7 @@ namespace MarbleMaker.Core.ECS
     }
 
     /// <summary>
-    /// Job to process goal pad logic and collect marbles
+    /// Job to process goal pads and collect marbles
     /// </summary>
     [BurstCompile]
     public struct ProcessGoalPadsJob : IJobEntity
@@ -119,14 +122,16 @@ namespace MarbleMaker.Core.ECS
         public EntityCommandBuffer.ParallelWriter ecb;
 
         public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
-                           ref GoalPad goalPad, in CellIndex cellIndex)
+                           RefRW<GoalPad> goalPad, in CellIndex cellIndex)
         {
-            // Check for marbles at this goal pad position
-            var marblesAtGoal = GetMarblesAtGoalPosition(goalPad.goalPosition);
+            // Check for marbles at this goal pad position (per-entity allocation for thread safety)
+            NativeList<Entity> marbles = new NativeList<Entity>(Allocator.Temp);
+            bool any = ECSLookups.TryGetMarblesAtCell(goalPad.ValueRO.goalPosition, marbles);
+            if (!any) { marbles.Dispose(); return; }
             
-            for (int i = 0; i < marblesAtGoal.Length; i++)
+            for (int i = 0; i < marbles.Length; i++)
             {
-                var marble = marblesAtGoal[i];
+                var marble = marbles[i];
                 if (marble != Entity.Null)
                 {
                     // Queue goal collection
@@ -134,40 +139,25 @@ namespace MarbleMaker.Core.ECS
                     {
                         goalEntity = entity,
                         marble = marble,
-                        goalPosition = goalPad.goalPosition,
-                        coinReward = goalPad.coinReward
+                        goalPosition = goalPad.ValueRO.goalPosition,
+                        coinReward = goalPad.ValueRO.coinReward
                     });
                     
                     // Queue coin award
                     coinAwardQueue.Enqueue(new CoinAward
                     {
-                        amount = goalPad.coinReward,
+                        amount = goalPad.ValueRO.coinReward,
                         goalEntity = entity,
                         awardTick = (long)SimulationTick.Current
                     });
                     
-                    // Update goal pad stats
-                    goalPad.marblesCollected++;
+                    // Update goal pad stats using RefRW for clarity
+                    goalPad.ValueRW.marblesCollected++;
                 }
             }
 
-            // Dispose temporary array
-            if (marblesAtGoal.IsCreated)
-                marblesAtGoal.Dispose();
-        }
-
-        /// <summary>
-        /// Gets marbles at the goal position
-        /// </summary>
-        [BurstCompile]
-        private NativeArray<Entity> GetMarblesAtGoalPosition(int3 goalPosition)
-        {
-            // In a full implementation, this would:
-            // 1. Query for marble entities at the goal position
-            // 2. Return all marbles at this position
-            
-            // Placeholder implementation
-            return new NativeArray<Entity>(0, Allocator.Temp);
+            // Dispose temporary list
+            marbles.Dispose();
         }
     }
 
@@ -191,9 +181,6 @@ namespace MarbleMaker.Core.ECS
                 // Update goal pad statistics would be handled by another system
                 // For now, we just destroy the marble
             }
-            
-            // Dispose the queue
-            goalCollectionQueue.Dispose();
         }
     }
 
@@ -213,9 +200,6 @@ namespace MarbleMaker.Core.ECS
                 // Award coins (would be sent to economy system)
                 AwardCoins(award.amount, award.goalEntity);
             }
-            
-            // Dispose the queue
-            coinAwardQueue.Dispose();
         }
 
         /// <summary>
@@ -250,9 +234,6 @@ namespace MarbleMaker.Core.ECS
                 // Log or handle fault
                 // UnityEngine.Debug.LogWarning($"Goal system fault: {fault.Code}");
             }
-            
-            // Dispose the fault queue
-            faults.Dispose();
         }
     }
 
@@ -346,8 +327,10 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(applyHandle);
 
-            // Set final dependency
+            // Set final dependency and dispose queues
             state.Dependency = faultHandle;
+            state.Dependency = goalDetectionQueue.Dispose(state.Dependency);
+            state.Dependency = faultQueue.Dispose(state.Dependency);
         }
     }
 
@@ -376,9 +359,7 @@ namespace MarbleMaker.Core.ECS
                            in CellIndex cellIndex, in PositionComponent position, in MarbleTag marbleTag)
         {
             // Check if marble is at a goal position
-            var goalAtPosition = GetGoalAtPosition(cellIndex.xyz);
-            
-            if (goalAtPosition != Entity.Null)
+            if (ECSLookups.TryGetGoalAtCell(cellIndex.xyz, out var goalAtPosition))
             {
                 // Queue goal detection
                 goalDetectionQueue.Enqueue(new GoalDetection
@@ -391,19 +372,7 @@ namespace MarbleMaker.Core.ECS
             }
         }
 
-        /// <summary>
-        /// Gets the goal at the specified position
-        /// </summary>
-        [BurstCompile]
-        private Entity GetGoalAtPosition(int3 position)
-        {
-            // In a full implementation, this would:
-            // 1. Query for goal entities at the specified position
-            // 2. Return the goal entity if found
-            
-            // Placeholder implementation
-            return Entity.Null;
-        }
+
     }
 
     /// <summary>
@@ -427,9 +396,6 @@ namespace MarbleMaker.Core.ECS
                     arrivalTick = detection.arrivalTick
                 });
             }
-            
-            // Dispose the queue
-            goalDetectionQueue.Dispose();
         }
     }
 
