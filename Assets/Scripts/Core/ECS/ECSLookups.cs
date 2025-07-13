@@ -1,0 +1,165 @@
+using Unity.Collections;
+using Unity.Entities;
+using Unity.Mathematics;
+using Unity.Jobs;
+using Unity.Burst;
+using System.Runtime.CompilerServices;
+using System.Collections.Generic;
+
+namespace MarbleMaker.Core.ECS
+{
+    /// <summary>
+    /// Unified lookup API for ECS entity queries with deterministic behavior
+    /// </summary>
+    public static class ECSLookups
+    {
+        private struct EntityIndexComparer : IComparer<Entity>
+        {
+            public int Compare(Entity x, Entity y) => x.Index.CompareTo(y.Index);
+        }
+        // Static caches for fast lookups
+        static NativeParallelHashMap<ulong, Entity> _splittersByCell;
+        static NativeParallelHashMap<ulong, Entity> _liftsByCell;
+        static NativeParallelMultiHashMap<ulong, Entity> _goalsByCell;
+        static NativeParallelMultiHashMap<ulong, Entity> _marblesByCell;
+
+        /// <summary>
+        /// Module initializer - runs once per domain reload
+        /// </summary>
+        [ModuleInitializer]
+        public static void Init()
+        {
+            _splittersByCell = new NativeParallelHashMap<ulong, Entity>(1024, Allocator.Persistent);
+            _liftsByCell = new NativeParallelHashMap<ulong, Entity>(1024, Allocator.Persistent);
+            _goalsByCell = new NativeParallelMultiHashMap<ulong, Entity>(1024, Allocator.Persistent);
+            _marblesByCell = new NativeParallelMultiHashMap<ulong, Entity>(4096, Allocator.Persistent);
+        }
+
+        /// <summary>
+        /// Dispose all static caches
+        /// </summary>
+        public static void Dispose()
+        {
+            if (_splittersByCell.IsCreated) _splittersByCell.Dispose();
+            if (_liftsByCell.IsCreated) _liftsByCell.Dispose();
+            if (_goalsByCell.IsCreated) _goalsByCell.Dispose();
+            if (_marblesByCell.IsCreated) _marblesByCell.Dispose();
+        }
+
+        // Public accessors for cache maps (needed by LookupCacheBuildSystem)
+        public static NativeParallelHashMap<ulong, Entity> SplittersByCell => _splittersByCell;
+        public static NativeParallelHashMap<ulong, Entity> LiftsByCell => _liftsByCell;
+        public static NativeParallelMultiHashMap<ulong, Entity> GoalsByCell => _goalsByCell;
+        public static NativeParallelMultiHashMap<ulong, Entity> MarblesByCell => _marblesByCell;
+
+        // Lookup API methods
+
+        /// <summary>
+        /// Try to get a splitter at the specified cell
+        /// </summary>
+        public static bool TryGetSplitterAtCell(in int3 cell, out Entity splitter)
+        {
+            ulong key = ECSUtils.PackCellKey(cell);
+            return _splittersByCell.TryGetValue(key, out splitter);
+        }
+
+        /// <summary>
+        /// Try to get a lift at the specified cell
+        /// </summary>
+        public static bool TryGetLiftAtCell(in int3 cell, out Entity lift)
+        {
+            ulong key = ECSUtils.PackCellKey(cell);
+            return _liftsByCell.TryGetValue(key, out lift);
+        }
+
+        /// <summary>
+        /// Try to get a goal at the specified cell
+        /// </summary>
+        public static bool TryGetGoalAtCell(in int3 cell, out Entity goal)
+        {
+            ulong key = ECSUtils.PackCellKey(cell);
+            var iterator = _goalsByCell.GetValuesForKey(key);
+            if (iterator.MoveNext())
+            {
+                goal = iterator.Current;
+                return true;
+            }
+            goal = Entity.Null;
+            return false;
+        }
+
+
+
+        public static bool TryGetMarbleAtCell(in int3 cell, out Entity marble)
+        {
+            ulong key = ECSUtils.PackCellKey(cell);
+            if (_marblesByCell.TryGetFirstValue(key, out var e, out var it))
+            {
+                marble = e;                       // lowest Entity.Index returns first
+                return true;
+            }
+            marble = Entity.Null;
+            return false;
+        }
+
+        public static bool TryGetMarblesAtCell(in int3 cell, NativeList<Entity> results)
+        {
+            results.Clear();
+            ulong key = ECSUtils.PackCellKey(cell);
+
+            if (_marblesByCell.TryGetFirstValue(key, out var e, out var it))
+            {
+                do { results.Add(e); }
+                while (_marblesByCell.TryGetNextValue(out e, ref it));
+
+                results.Sort(new EntityIndexComparer());          // Deterministic order
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Convenience wrapper so caller doesn't have to unpack CellIndex.
+        /// `cellLookup` *must* be read-only.
+        /// </summary>
+        public static bool TryGetMarbleAtSplitter(
+            in Entity splitter,
+            in ComponentLookup<CellIndex> cellLookup,
+            out Entity marble)
+        {
+            if (!cellLookup.HasComponent(splitter))
+            {
+                marble = Entity.Null;
+                return false;
+            }
+#if UNITY_ASSERTIONS
+            UnityEngine.Assertions.Assert.IsTrue(
+                cellLookup.HasComponent(splitter),
+                "Splitter entity missing CellIndex!"
+            );
+#endif
+            return TryGetMarbleAtCell(cellLookup[splitter].xyz, out marble);
+        }
+
+        public static bool TryGetMarbleAtLift(
+            in Entity lift,
+            in ComponentLookup<CellIndex> cellLookup,
+            out Entity marble)
+        {
+            if (!cellLookup.HasComponent(lift))
+            {
+                marble = Entity.Null;
+                return false;
+            }
+#if UNITY_ASSERTIONS
+            UnityEngine.Assertions.Assert.IsTrue(
+                cellLookup.HasComponent(lift),
+                "Lift entity missing CellIndex!"
+            );
+#endif
+            return TryGetMarbleAtCell(cellLookup[lift].xyz, out marble);
+        }
+
+
+    }
+} 

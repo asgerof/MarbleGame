@@ -20,9 +20,6 @@ namespace MarbleMaker.Core.ECS
     {
         // ECB system reference
         private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
-        
-        // High water mark for capacity management
-        private static int _liftOperationHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -43,13 +40,16 @@ namespace MarbleMaker.Core.ECS
 
             // Get ECB for marble movement
             var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+            var cellLookupRO = SystemAPI.GetComponentLookup<CellIndex>(true);
+            cellLookupRO.Update(ref state);          // Mandatory safety call
 
             // Process lifts in parallel
             var processLiftsJob = new ProcessLiftsJob
             {
                 liftOperationQueue = liftOperationQueue.AsParallelWriter(),
                 faultQueue = faultQueue.AsParallelWriter(),
-                ecb = ecb
+                ecb = ecb,
+                cellLookup = cellLookupRO
             };
             var processHandle = processLiftsJob.ScheduleParallel(state.Dependency);
 
@@ -68,8 +68,10 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(applyHandle);
 
-            // Set final dependency
+            // Set final dependency and dispose queues
             state.Dependency = faultHandle;
+            state.Dependency = liftOperationQueue.Dispose(state.Dependency);
+            state.Dependency = faultQueue.Dispose(state.Dependency);
         }
     }
 
@@ -93,6 +95,7 @@ namespace MarbleMaker.Core.ECS
         public NativeQueue<LiftOperation>.ParallelWriter liftOperationQueue;
         public NativeQueue<Fault>.ParallelWriter faultQueue;
         public EntityCommandBuffer.ParallelWriter ecb;
+        [ReadOnly] public ComponentLookup<CellIndex> cellLookup;
 
         public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
                            ref LiftState liftState, in CellIndex cellIndex)
@@ -110,8 +113,7 @@ namespace MarbleMaker.Core.ECS
             }
 
             // Check for marbles at this lift position
-            var marbleEntity = GetMarbleAtLift(entity, cellIndex);
-            if (marbleEntity != Entity.Null)
+            if (ECSLookups.TryGetMarbleAtLift(entity, cellLookup, out var marbleEntity))
             {
                 // Calculate target position (move up one cell)
                 var currentPosition = cellIndex.xyz;
@@ -148,16 +150,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Gets the marble entity at the lift's position
         /// </summary>
-        [BurstCompile]
-        private Entity GetMarbleAtLift(Entity liftEntity, CellIndex cellIndex)
-        {
-            // In a full implementation, this would:
-            // 1. Query for marble entities at the lift's position
-            // 2. Return the first marble ready to be lifted
-            
-            // Placeholder implementation
-            return Entity.Null;
-        }
+
     }
 
     /// <summary>
@@ -184,9 +177,6 @@ namespace MarbleMaker.Core.ECS
                 var centerPosition = ECSUtils.CellIndexToPosition(operation.targetPosition);
                 ecb.SetComponent(operation.marble, new PositionComponent { Value = centerPosition });
             }
-            
-            // Dispose the queue
-            liftOperationQueue.Dispose();
         }
     }
 
@@ -206,9 +196,6 @@ namespace MarbleMaker.Core.ECS
                 // Log or handle fault
                 // UnityEngine.Debug.LogWarning($"Lift system fault: {fault.Code}");
             }
-            
-            // Dispose the fault queue
-            faults.Dispose();
         }
     }
 

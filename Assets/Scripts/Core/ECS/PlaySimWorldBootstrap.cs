@@ -47,6 +47,8 @@ namespace MarbleMaker.Core.ECS
                 _playWorld = null;
             }
             
+            ECSLookups.Dispose();      // Clean up static lookup caches
+            
             // Reset archetypes
             Archetypes.Reset();
         }

@@ -19,9 +19,6 @@ namespace MarbleMaker.Core.ECS
     {
         // ECB system reference
         private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
-        
-        // High water mark for capacity management
-        private static int _splitterRoutingHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -43,6 +40,8 @@ namespace MarbleMaker.Core.ECS
 
             // Get ECB for marble routing
             var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
+            var cellLookupRO = SystemAPI.GetComponentLookup<CellIndex>(true);
+            cellLookupRO.Update(ref state);          // Mandatory safety call
 
             // Process splitters in parallel
             var processSplittersJob = new ProcessSplittersJob
@@ -51,7 +50,8 @@ namespace MarbleMaker.Core.ECS
                 triggerRemovalQueue = triggerRemovalQueue.AsParallelWriter(),
                 faultQueue = faultQueue.AsParallelWriter(),
                 ecb = ecb,
-                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true)
+                triggerLookup = SystemAPI.GetComponentLookup<InSplitterTrigger>(true),
+                cellLookup = cellLookupRO
             };
             var processHandle = processSplittersJob.ScheduleParallel(state.Dependency);
 
@@ -71,8 +71,11 @@ namespace MarbleMaker.Core.ECS
             };
             var faultHandle = processFaultsJob.Schedule(applyHandle);
 
-            // Set final dependency
+            // Set final dependency and dispose queues
             state.Dependency = faultHandle;
+            state.Dependency = routingQueue.Dispose(state.Dependency);
+            state.Dependency = triggerRemovalQueue.Dispose(state.Dependency);
+            state.Dependency = faultQueue.Dispose(state.Dependency);
         }
     }
 
@@ -107,6 +110,7 @@ namespace MarbleMaker.Core.ECS
         public NativeQueue<Fault>.ParallelWriter faultQueue;
         public EntityCommandBuffer.ParallelWriter ecb;
         [ReadOnly] public ComponentLookup<InSplitterTrigger> triggerLookup;
+        [ReadOnly] public ComponentLookup<CellIndex> cellLookup;
 
         public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
                            ref SplitterState splitterState, in CellIndex cellIndex)
@@ -122,9 +126,8 @@ namespace MarbleMaker.Core.ECS
                 // Calculate output position based on exit
                 var outputPosition = CalculateOutputPosition(cellIndex.xyz, exitToUse);
                 
-                // Get marble at splitter (placeholder for now)
-                var marbleEntity = GetMarbleAtSplitter(entity, cellIndex);
-                if (marbleEntity != Entity.Null)
+                // Get marble at splitter using unified lookup API
+                if (ECSLookups.TryGetMarbleAtSplitter(entity, cellLookup, out var marbleEntity))
                 {
                     // Queue routing operation
                     routingQueue.Enqueue(new SplitterRouting
@@ -211,19 +214,7 @@ namespace MarbleMaker.Core.ECS
             return triggerLookup.HasComponent(splitterEntity);
         }
 
-        /// <summary>
-        /// Gets the marble entity at the splitter's input
-        /// </summary>
-        [BurstCompile]
-        private Entity GetMarbleAtSplitter(Entity splitterEntity, CellIndex cellIndex)
-        {
-            // In a full implementation, this would:
-            // 1. Query for marble entities at the splitter's input position
-            // 2. Return the first marble ready to be routed
-            
-            // Placeholder implementation
-            return Entity.Null;
-        }
+
     }
 
     /// <summary>
@@ -257,10 +248,6 @@ namespace MarbleMaker.Core.ECS
             {
                 ecb.RemoveComponent<InSplitterTrigger>(removal.entity);
             }
-            
-            // Dispose queues
-            routingQueue.Dispose();
-            triggerRemovalQueue.Dispose();
         }
     }
 
@@ -280,9 +267,6 @@ namespace MarbleMaker.Core.ECS
                 // Log or handle fault
                 // UnityEngine.Debug.LogWarning($"Splitter system fault: {fault.Code}");
             }
-            
-            // Dispose the fault queue
-            faults.Dispose();
         }
     }
 
@@ -372,9 +356,7 @@ namespace MarbleMaker.Core.ECS
                            in CellIndex cellIndex, in PositionComponent position, in MarbleTag marbleTag)
         {
             // Check if marble is at a splitter input position
-            var splitterAtPosition = GetSplitterAtPosition(cellIndex.xyz);
-            
-            if (splitterAtPosition != Entity.Null)
+            if (ECSLookups.TryGetSplitterAtCell(cellIndex.xyz, out var splitterAtPosition))
             {
                 // Queue input detection
                 inputDetectionQueue.Enqueue(new SplitterInputDetection
@@ -387,19 +369,7 @@ namespace MarbleMaker.Core.ECS
             }
         }
 
-        /// <summary>
-        /// Gets the splitter at the specified position
-        /// </summary>
-        [BurstCompile]
-        private Entity GetSplitterAtPosition(int3 position)
-        {
-            // In a full implementation, this would:
-            // 1. Query for splitter entities at the specified position
-            // 2. Return the splitter entity if found
-            
-            // Placeholder implementation
-            return Entity.Null;
-        }
+
     }
 
     /// <summary>

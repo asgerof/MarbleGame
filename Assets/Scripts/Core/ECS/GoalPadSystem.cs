@@ -2,6 +2,7 @@ using Unity.Entities;
 using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using MarbleMaker.Core.ECS;
 
@@ -18,9 +19,6 @@ namespace MarbleMaker.Core.ECS
     {
         // ECB system reference
         private EndFixedStepSimulationEntityCommandBufferSystem _endSim;
-        
-        // High water mark for capacity management
-        private static int _goalCollectionHighWaterMark = 64;
 
         [BurstCompile]
         public void OnCreate(ref SystemState state)
@@ -49,15 +47,23 @@ namespace MarbleMaker.Core.ECS
             // Get ECB for marble destruction
             var ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged).AsParallelWriter();
 
+            // Allocate scratch lists - one per logical worker
+            int threadCount = JobsUtility.MaxJobThreadCount;
+            var scratchLists = new NativeArray<NativeList<Entity>>(threadCount, Allocator.TempJob);
+            for (int i = 0; i < threadCount; i++)
+                scratchLists[i] = new NativeList<Entity>(16, Allocator.Temp);
+
             // Process goal pads in parallel
             var processGoalPadsJob = new ProcessGoalPadsJob
             {
                 goalCollectionQueue = goalCollectionQueue.AsParallelWriter(),
                 coinAwardQueue = coinAwardQueue.AsParallelWriter(),
                 faultQueue = faultQueue.AsParallelWriter(),
-                ecb = ecb
+                ecb = ecb,
+                scratchLists = scratchLists
             };
             var processHandle = processGoalPadsJob.ScheduleParallel(state.Dependency);
+            processHandle.Complete();                               // ensure job is done before disposing
 
             // Apply goal collections
             var applyGoalCollectionsJob = new ApplyGoalCollectionsJob
@@ -80,6 +86,11 @@ namespace MarbleMaker.Core.ECS
                 faults = faultQueue
             };
             var faultHandle = processFaultsJob.Schedule(coinHandle);
+
+            // Dispose scratch lists
+            for (int i = 0; i < threadCount; i++)
+                scratchLists[i].Dispose();
+            scratchLists.Dispose();
 
             // Set final dependency and dispose queues
             state.Dependency = faultHandle;
@@ -121,13 +132,18 @@ namespace MarbleMaker.Core.ECS
         public NativeQueue<Fault>.ParallelWriter faultQueue;
         public EntityCommandBuffer.ParallelWriter ecb;
 
+        [NativeDisableParallelForRestriction]
+        public NativeArray<NativeList<Entity>> scratchLists;
+
         public void Execute(Entity entity, [EntityIndexInQuery] int entityInQueryIndex,
                            RefRW<GoalPad> goalPad, in CellIndex cellIndex)
         {
-            // Check for marbles at this goal pad position (per-entity allocation for thread safety)
-            NativeList<Entity> marbles = new NativeList<Entity>(Allocator.Temp);
-            bool any = ECSLookups.TryGetMarblesAtCell(goalPad.ValueRO.goalPosition, marbles);
-            if (!any) { marbles.Dispose(); return; }
+            // Pick thread-local list and clear
+            var marbles = scratchLists[JobsUtility.ThreadIndex];
+            marbles.Clear();
+
+            if (!ECSLookups.TryGetMarblesAtCell(goalPad.ValueRO.goalPosition, marbles))
+                return;
             
             for (int i = 0; i < marbles.Length; i++)
             {
@@ -155,9 +171,6 @@ namespace MarbleMaker.Core.ECS
                     goalPad.ValueRW.marblesCollected++;
                 }
             }
-
-            // Dispose temporary list
-            marbles.Dispose();
         }
     }
 
