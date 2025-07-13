@@ -16,6 +16,10 @@ namespace MarbleMaker.Core.ECS
     {
 #if ENABLE_PROFILER
         static readonly ProfilerMarker _clearMarker = new ProfilerMarker("LookupCache.Clear");
+        static readonly ProfilerMarker _populateSplittersMarker = new ProfilerMarker("LookupCache.PopulateSplitters");
+        static readonly ProfilerMarker _populateLiftsMarker = new ProfilerMarker("LookupCache.PopulateLifts");
+        static readonly ProfilerMarker _populateGoalsMarker = new ProfilerMarker("LookupCache.PopulateGoals");
+        static readonly ProfilerMarker _populateMarblesMarker = new ProfilerMarker("LookupCache.PopulateMarbles");
 #endif
         
         // High-water mark optimization to reduce O(N) resize operations
@@ -91,37 +95,59 @@ namespace MarbleMaker.Core.ECS
             // ------------------------------------------------------------------
             // 2. Schedule population passes (run in parallel)
             // ------------------------------------------------------------------
-            var splittersWriter = ECSLookups.SplittersByCell.AsParallelWriter();
-            var splitterHandle = SystemAPI
-                .ForEach((Entity e, in CellIndex c, in SplitterState _) =>
-                {
-                    var key = ECSUtils.PackCellKey(c.xyz);
-                    if (!splittersWriter.TryAdd(key, e))
-                        RecordDuplicate(key, 0);
-                })
-                .ScheduleParallel(state.Dependency);
+            JobHandle splitterHandle, liftHandle, goalHandle, marbleHandle;
+            
+#if ENABLE_PROFILER
+            using (_populateSplittersMarker.Auto())
+#endif
+            {
+                var splittersWriter = ECSLookups.SplittersByCell.AsParallelWriter();
+                splitterHandle = SystemAPI
+                    .ForEach((Entity e, in CellIndex c, in SplitterState _) =>
+                    {
+                        var key = ECSUtils.PackCellKey(c.xyz);
+                        if (!splittersWriter.TryAdd(key, e))
+                            RecordDuplicate(key, 0);
+                    })
+                    .ScheduleParallel(state.Dependency);
+            }
 
-            var liftsWriter = ECSLookups.LiftsByCell.AsParallelWriter();
-            var liftHandle = SystemAPI
-                .ForEach((Entity e, in CellIndex c, in LiftState _) =>
-                {
-                    var key = ECSUtils.PackCellKey(c.xyz);
-                    if (!liftsWriter.TryAdd(key, e))
-                        RecordDuplicate(key, 1);
-                })
-                .ScheduleParallel(state.Dependency);
+#if ENABLE_PROFILER
+            using (_populateLiftsMarker.Auto())
+#endif
+            {
+                var liftsWriter = ECSLookups.LiftsByCell.AsParallelWriter();
+                liftHandle = SystemAPI
+                    .ForEach((Entity e, in CellIndex c, in LiftState _) =>
+                    {
+                        var key = ECSUtils.PackCellKey(c.xyz);
+                        if (!liftsWriter.TryAdd(key, e))
+                            RecordDuplicate(key, 1);
+                    })
+                    .ScheduleParallel(state.Dependency);
+            }
 
-            var goalsWriter = ECSLookups.GoalsByCell.AsParallelWriter();
-            var goalHandle = SystemAPI
-                .ForEach((Entity e, in CellIndex c, in GoalPad _) =>
-                    goalsWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
-                .ScheduleParallel(state.Dependency);
+#if ENABLE_PROFILER
+            using (_populateGoalsMarker.Auto())
+#endif
+            {
+                var goalsWriter = ECSLookups.GoalsByCell.AsParallelWriter();
+                goalHandle = SystemAPI
+                    .ForEach((Entity e, in CellIndex c, in GoalPad _) =>
+                        goalsWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
+                    .ScheduleParallel(state.Dependency);
+            }
 
-            var marblesWriter = ECSLookups.MarblesByCell.AsParallelWriter();
-            var marbleHandle = SystemAPI
-                .ForEach((Entity e, in CellIndex c, in MarbleTag _) =>
-                    marblesWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
-                .ScheduleParallel(state.Dependency);
+#if ENABLE_PROFILER
+            using (_populateMarblesMarker.Auto())
+#endif
+            {
+                var marblesWriter = ECSLookups.MarblesByCell.AsParallelWriter();
+                marbleHandle = SystemAPI
+                    .ForEach((Entity e, in CellIndex c, in MarbleTag _) =>
+                        marblesWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
+                    .ScheduleParallel(state.Dependency);
+            }
 
             // Combine all four handles so later systems see a fully built cache
             state.Dependency = JobHandle.CombineDependencies(

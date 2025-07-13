@@ -57,6 +57,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Try to get a splitter at the specified cell
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetSplitterAtCell(in int3 cell, out Entity splitter)
         {
             ulong key = ECSUtils.PackCellKey(cell);
@@ -66,6 +67,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Try to get a lift at the specified cell
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetLiftAtCell(in int3 cell, out Entity lift)
         {
             ulong key = ECSUtils.PackCellKey(cell);
@@ -75,6 +77,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Try to get a goal at the specified cell
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetGoalAtCell(in int3 cell, out Entity goal)
         {
             goal = default;
@@ -96,6 +99,7 @@ namespace MarbleMaker.Core.ECS
 
 
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool TryGetMarbleAtCell(in int3 cell, out Entity marble)
         {
             marble = default;
