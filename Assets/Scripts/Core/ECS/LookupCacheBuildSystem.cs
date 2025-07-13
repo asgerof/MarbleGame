@@ -26,6 +26,15 @@ namespace MarbleMaker.Core.ECS
         [BurstCompile]
         public void OnUpdate(ref SystemState state)
         {
+            void RecordDuplicate(in ulong key, byte type)   // 0 = Splitter, 1 = Lift
+            {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                Unity.Assertions.Assert.IsTrue(false, 
+                    $"Duplicate {(type == 0 ? "splitter" : "lift")} at cellKey {key}");
+#endif
+                // Future: push to a FaultQueue if we wire one in
+            }
+
             // ------------------------------------------------------------------
             // 1. Clear caches on the main thread (O(capacity) once per frame)
             // ------------------------------------------------------------------
@@ -40,39 +49,43 @@ namespace MarbleMaker.Core.ECS
             }
 
             // ------------------------------------------------------------------
-            // 2. Schedule population passes — one Entities.ForEach per type
+            // 2. Schedule population passes (run in parallel)
             // ------------------------------------------------------------------
             var splittersWriter = ECSLookups.SplittersByCell.AsParallelWriter();
-            state.Dependency = SystemAPI
-                .ForEach((Entity e, in CellIndex cell, in SplitterState _) =>
+            var splitterHandle = SystemAPI
+                .ForEach((Entity e, in CellIndex c, in SplitterState _) =>
                 {
-                    splittersWriter.TryAdd(ECSUtils.PackCellKey(cell.xyz), e);
+                    var key = ECSUtils.PackCellKey(c.xyz);
+                    if (!splittersWriter.TryAdd(key, e))
+                        RecordDuplicate(key, 0);
                 })
                 .ScheduleParallel(state.Dependency);
 
             var liftsWriter = ECSLookups.LiftsByCell.AsParallelWriter();
-            state.Dependency = SystemAPI
-                .ForEach((Entity e, in CellIndex cell, in LiftState _) =>
+            var liftHandle = SystemAPI
+                .ForEach((Entity e, in CellIndex c, in LiftState _) =>
                 {
-                    liftsWriter.TryAdd(ECSUtils.PackCellKey(cell.xyz), e);
+                    var key = ECSUtils.PackCellKey(c.xyz);
+                    if (!liftsWriter.TryAdd(key, e))
+                        RecordDuplicate(key, 1);
                 })
                 .ScheduleParallel(state.Dependency);
 
             var goalsWriter = ECSLookups.GoalsByCell.AsParallelWriter();
-            state.Dependency = SystemAPI
-                .ForEach((Entity e, in CellIndex cell, in GoalPad _) =>
-                {
-                    goalsWriter.Add(ECSUtils.PackCellKey(cell.xyz), e);
-                })
+            var goalHandle = SystemAPI
+                .ForEach((Entity e, in CellIndex c, in GoalPad _) =>
+                    goalsWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
                 .ScheduleParallel(state.Dependency);
 
             var marblesWriter = ECSLookups.MarblesByCell.AsParallelWriter();
-            state.Dependency = SystemAPI
-                .ForEach((Entity e, in CellIndex cell, in MarbleTag _) =>
-                {
-                    marblesWriter.Add(ECSUtils.PackCellKey(cell.xyz), e);
-                })
+            var marbleHandle = SystemAPI
+                .ForEach((Entity e, in CellIndex c, in MarbleTag _) =>
+                    marblesWriter.Add(ECSUtils.PackCellKey(c.xyz), e))
                 .ScheduleParallel(state.Dependency);
+
+            // Combine all four handles so later systems see a fully built cache
+            state.Dependency = JobHandle.CombineDependencies(
+                splitterHandle, liftHandle, goalHandle, marbleHandle);
         }
     }
 

@@ -66,6 +66,7 @@ namespace MarbleMaker.Core.ECS
                     _playWorld = null;
                 }
                 
+                ECSLookups.Dispose();           // NEW – mirrors runtime unload
                 // Reset archetypes
                 Archetypes.Reset();
             }
