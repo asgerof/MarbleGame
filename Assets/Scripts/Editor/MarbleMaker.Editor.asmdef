@@ -1,8 +1,12 @@
 {
-    "name": "MarbleMaker.Core",
-    "rootNamespace": "MarbleMaker.Core",
-    "references": [],
-    "includePlatforms": [],
+    "name": "MarbleMaker.Editor",
+    "rootNamespace": "MarbleMaker.Editor",
+    "references": [
+        "MarbleMaker.Core"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,

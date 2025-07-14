@@ -1,12 +1,13 @@
 {
-    "name": "MarbleMaker.Editor",
-    "rootNamespace": "MarbleMaker.Editor",
+    "name": "MarbleMaker.Core",
+    "rootNamespace": "MarbleMaker.Core",
     "references": [
-        "MarbleMaker.Core"
+        "Unity.Mathematics",
+        "Unity.Collections"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": false,
+    "allowUnsafeCode": true,
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": true,
