@@ -13,15 +13,22 @@ namespace MarbleMaker.Core.ECS
     /// </summary>
     public static class ECSLookups
     {
-        private struct EntityIndexComparer : IComparer<Entity>
+        // -----------------------------------------------------------------------------
+        // Burst-friendly comparer (no interface call)
+        // -----------------------------------------------------------------------------
+        internal struct EntityIndexComparer
         {
-            public int Compare(Entity x, Entity y) => x.Index.CompareTo(y.Index);
+            // NativeArray.Sort(...) expects a static Compare(ref, ref) method
+            public static int Compare(ref Entity a, ref Entity b)
+            {
+                return a.Index.CompareTo(b.Index);
+            }
         }
         // Static caches for fast lookups
-        static NativeParallelHashMap<ulong, Entity> _splittersByCell;
-        static NativeParallelHashMap<ulong, Entity> _liftsByCell;
-        static NativeParallelMultiHashMap<ulong, Entity> _goalsByCell;
-        static NativeParallelMultiHashMap<ulong, Entity> _marblesByCell;
+        [NativeDisableUnsafePtrRestriction] static NativeParallelHashMap<ulong, Entity> _splittersByCell;
+        [NativeDisableUnsafePtrRestriction] static NativeParallelHashMap<ulong, Entity> _liftsByCell;
+        [NativeDisableUnsafePtrRestriction] static NativeParallelMultiHashMap<ulong, Entity> _goalsByCell;
+        [NativeDisableUnsafePtrRestriction] static NativeParallelMultiHashMap<ulong, Entity> _marblesByCell;
 
         /// <summary>
         /// Module initializer - runs once per domain reload
@@ -129,7 +136,7 @@ namespace MarbleMaker.Core.ECS
                 do { results.Add(e); }
                 while (_marblesByCell.TryGetNextValue(out e, ref it));
 
-                results.Sort(new EntityIndexComparer());          // Deterministic order
+                results.AsNativeArray().Sort<Entity, EntityIndexComparer>();          // Deterministic order
                 return true;
             }
             return false;

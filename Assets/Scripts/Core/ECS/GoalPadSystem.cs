@@ -49,51 +49,65 @@ namespace MarbleMaker.Core.ECS
 
             // Allocate scratch lists - one per logical worker
             int threadCount = JobsUtility.MaxJobThreadCount;
-            var scratchLists = new NativeArray<NativeList<Entity>>(threadCount, Allocator.TempJob);
-            for (int i = 0; i < threadCount; i++)
-                scratchLists[i] = new NativeList<Entity>(16, Allocator.Temp);
-
-            // Process goal pads in parallel
-            var processGoalPadsJob = new ProcessGoalPadsJob
+            NativeArray<NativeList<Entity>> scratchLists = default;
+            try
             {
-                goalCollectionQueue = goalCollectionQueue.AsParallelWriter(),
-                coinAwardQueue = coinAwardQueue.AsParallelWriter(),
-                faultQueue = faultQueue.AsParallelWriter(),
-                ecb = ecb,
-                scratchLists = scratchLists
-            };
-            var processHandle = processGoalPadsJob.ScheduleParallel(state.Dependency);
-            state.Dependency = processHandle;
+                scratchLists = new NativeArray<NativeList<Entity>>(threadCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                for (int i = 0; i < threadCount; i++)
+                    scratchLists[i] = new NativeList<Entity>(16, Allocator.Temp);
 
-            // Apply goal collections
-            var applyGoalCollectionsJob = new ApplyGoalCollectionsJob
+                // Process goal pads in parallel
+                var processGoalPadsJob = new ProcessGoalPadsJob
+                {
+                    goalCollectionQueue = goalCollectionQueue.AsParallelWriter(),
+                    coinAwardQueue = coinAwardQueue.AsParallelWriter(),
+                    faultQueue = faultQueue.AsParallelWriter(),
+                    ecb = ecb,
+                    scratchLists = scratchLists
+                };
+                var processHandle = processGoalPadsJob.ScheduleParallel(state.Dependency);
+                state.Dependency = processHandle;
+
+                // Apply goal collections
+                var applyGoalCollectionsJob = new ApplyGoalCollectionsJob
+                {
+                    goalCollectionQueue = goalCollectionQueue,
+                    ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
+                };
+                var applyHandle = applyGoalCollectionsJob.Schedule(state.Dependency);
+
+                // Process coin awards
+                var processCoinAwardsJob = new ProcessCoinAwardsJob
+                {
+                    coinAwardQueue = coinAwardQueue
+                };
+                var coinHandle = processCoinAwardsJob.Schedule(applyHandle);
+
+                // Process faults
+                var processFaultsJob = new ProcessFaultsJob
+                {
+                    faults = faultQueue
+                };
+                var faultHandle = processFaultsJob.Schedule(coinHandle);
+
+                // Set final dependency and dispose queues (but not scratch lists - handled in finally)
+                state.Dependency = JobHandle.CombineDependencies(
+                    faultHandle,
+                    goalCollectionQueue.Dispose(faultHandle),
+                    coinAwardQueue.Dispose(faultHandle),
+                    faultQueue.Dispose(faultHandle));
+            }
+            finally
             {
-                goalCollectionQueue = goalCollectionQueue,
-                ecb = _endSim.CreateCommandBuffer(state.WorldUnmanaged)
-            };
-            var applyHandle = applyGoalCollectionsJob.Schedule(state.Dependency);
+                if (scratchLists.IsCreated)
+                {
+                    // .Dispose() each NativeList element first
+                    for (int i = 0; i < scratchLists.Length; i++)
+                        if (scratchLists[i].IsCreated) scratchLists[i].Dispose();
 
-            // Process coin awards
-            var processCoinAwardsJob = new ProcessCoinAwardsJob
-            {
-                coinAwardQueue = coinAwardQueue
-            };
-            var coinHandle = processCoinAwardsJob.Schedule(applyHandle);
-
-            // Process faults
-            var processFaultsJob = new ProcessFaultsJob
-            {
-                faults = faultQueue
-            };
-            var faultHandle = processFaultsJob.Schedule(coinHandle);
-
-            // Dispose all containers and scratch lists
-            state.Dependency = JobHandle.CombineDependencies(
-                faultHandle,
-                new ScratchDisposerJob { lists = scratchLists }.Schedule(),
-                goalCollectionQueue.Dispose(faultHandle),
-                coinAwardQueue.Dispose(faultHandle),
-                faultQueue.Dispose(faultHandle));
+                    scratchLists.Dispose();
+                }
+            }
         }
     }
 
@@ -451,15 +465,5 @@ namespace MarbleMaker.Core.ECS
         Bonus = 4                           // Provides bonus rewards
     }
 
-    [BurstCompile]
-    struct ScratchDisposerJob : IJob
-    {
-        public NativeArray<NativeList<Entity>> lists;
-        public void Execute()
-        {
-            for (int i = 0; i < lists.Length; i++)
-                lists[i].Dispose();
-            lists.Dispose();
-        }
-    }
+
 } 
