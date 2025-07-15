@@ -79,6 +79,17 @@ namespace MarbleMaker.Core.ECS
     public struct CellIndex : IComponentData
     {
         public int3 Value;
+
+        public CellIndex(int3 xyz)
+        {
+            Value = xyz;
+        }
+
+        public int3 xyz
+        {
+            readonly get => Value;
+            set => Value = value;
+        }
     }
 
     /// <summary>
@@ -200,6 +211,9 @@ namespace MarbleMaker.Core.ECS
     {
         public bool isActive;
         public int targetScore;
+        public int3 goalPosition;
+        public int coinReward;
+        public int marblesCollected;
     }
 
     /// <summary>
@@ -332,6 +346,7 @@ namespace MarbleMaker.Core.ECS
     /// <summary>
     /// Utility functions for cell hash and marble operations
     /// </summary>
+    [BurstCompile]
     public static class ECSUtils
     {
         /// <summary>
@@ -401,7 +416,8 @@ namespace MarbleMaker.Core.ECS
     public struct SplitterState : IComponentData
     {
         public byte NextLaneIndex;   // round-robin pointer
-        public bool OverrideEnabled; // set by click
+        public bool OverrideEnabled; // legacy flag
+        public bool overrideExit;    // player override active
         public byte currentExit;     // current exit index
         public byte overrideValue;   // override exit value
     }
@@ -418,6 +434,11 @@ namespace MarbleMaker.Core.ECS
         public uint CapacityMask; // (capacity-1) – MUST be power of two
         public byte level;  // upgrade level (0=basic, 1=FIFO, 2=burst)
         public uint burstSize; // burst size for level 2
+
+        // Legacy names used by tests
+        public uint head;
+        public uint tail;
+        public uint count;
     }
 
     /// <summary>
