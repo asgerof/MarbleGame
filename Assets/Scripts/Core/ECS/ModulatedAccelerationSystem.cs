@@ -84,7 +84,7 @@ namespace MarbleMaker.Core.ECS
             if (needsCacheRebuild)
             {
                 // Rebuild acceleration cache
-                cacheHandle = RebuildAccelerationCache(state, cacheHandle);
+                cacheHandle = RebuildAccelerationCache(ref state, cacheHandle);
                 _cacheValid = true;
                 _lastCacheUpdate = currentTick;
             }
@@ -126,7 +126,7 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Rebuilds the acceleration cache for all cells with modules/connectors
         /// </summary>
-        private JobHandle RebuildAccelerationCache(SystemState state, JobHandle inputDeps)
+        private JobHandle RebuildAccelerationCache(ref SystemState state, JobHandle inputDeps)
         {
             // Clear existing cache
             _accelerationCache.Clear();

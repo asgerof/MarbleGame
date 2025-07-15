@@ -53,10 +53,10 @@ namespace MarbleMaker.Core.ECS
         }
 
         // Public accessors for cache maps (needed by LookupCacheBuildSystem)
-        public static NativeParallelHashMap<ulong, Entity> SplittersByCell => _splittersByCell;
-        public static NativeParallelHashMap<ulong, Entity> LiftsByCell => _liftsByCell;
-        public static NativeParallelMultiHashMap<ulong, Entity> GoalsByCell => _goalsByCell;
-        public static NativeParallelMultiHashMap<ulong, Entity> MarblesByCell => _marblesByCell;
+        public static ref NativeParallelHashMap<ulong, Entity> SplittersByCell => ref _splittersByCell;
+        public static ref NativeParallelHashMap<ulong, Entity> LiftsByCell => ref _liftsByCell;
+        public static ref NativeParallelMultiHashMap<ulong, Entity> GoalsByCell => ref _goalsByCell;
+        public static ref NativeParallelMultiHashMap<ulong, Entity> MarblesByCell => ref _marblesByCell;
 
         // Lookup API methods
 
@@ -135,7 +135,8 @@ namespace MarbleMaker.Core.ECS
                 do { results.Add(e); }
                 while (_marblesByCell.TryGetNextValue(out e, ref it));
 
-                results.Sort<Entity, EntityIndexComparer>();          // Deterministic order
+                var comparer = new EntityIndexComparer();
+                results.Sort(comparer);          // Deterministic order
                 return true;
             }
             return false;

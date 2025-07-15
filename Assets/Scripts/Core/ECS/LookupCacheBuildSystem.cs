@@ -165,7 +165,7 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct PopulateSplittersJob : IJobEntity
     {
-        public NativeParallelMultiHashMap<ulong, Entity>.ParallelWriter splittersWriter;
+        public NativeParallelHashMap<ulong, Entity>.ParallelWriter splittersWriter;
 
         public void Execute(Entity entity, in CellIndex cellIndex, in SplitterState splitterState)
         {
@@ -180,7 +180,7 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct PopulateLiftsJob : IJobEntity
     {
-        public NativeParallelMultiHashMap<ulong, Entity>.ParallelWriter liftsWriter;
+        public NativeParallelHashMap<ulong, Entity>.ParallelWriter liftsWriter;
 
         public void Execute(Entity entity, in CellIndex cellIndex, in LiftState liftState)
         {

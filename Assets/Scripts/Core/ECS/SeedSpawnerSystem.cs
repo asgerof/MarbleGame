@@ -101,13 +101,13 @@ namespace MarbleMaker.Core.ECS
             
             // Set initial position at cell center
             var cellCenter = ECSUtils.CellIndexToPosition(spawner.spawnPosition);
-            ecb.SetComponent(marbleEntity, cellCenter);
+            ecb.SetComponent(marbleEntity, new TranslationFP(cellCenter));
             
             // Set initial velocity to zero
-            ecb.SetComponent(marbleEntity, Fixed32.ZERO);
+            ecb.SetComponent(marbleEntity, new VelocityFP(Fixed32x3.Zero));
             
             // Set initial acceleration to zero (will be calculated by physics system)
-            ecb.SetComponent(marbleEntity, Fixed32.ZERO);
+            ecb.SetComponent(marbleEntity, new AccelerationFP(Fixed32x3.Zero));
             
             // Set initial cell index
             ecb.SetComponent(marbleEntity, new CellIndex(spawner.spawnPosition));
@@ -171,13 +171,13 @@ namespace MarbleMaker.Core.ECS
             
             // Set initial position at cell center
             var cellCenter = ECSUtils.CellIndexToPosition(cellPosition);
-            ecb.SetComponent(marbleEntity, cellCenter);
+            ecb.SetComponent(marbleEntity, new TranslationFP(cellCenter));
             
             // Set initial velocity
-            ecb.SetComponent(marbleEntity, initialVelocity);
+            ecb.SetComponent(marbleEntity, new VelocityFP(initialVelocity));
             
             // Set initial acceleration to zero
-            ecb.SetComponent(marbleEntity, Fixed32.ZERO);
+            ecb.SetComponent(marbleEntity, new AccelerationFP(Fixed32x3.Zero));
             
             // Set initial cell index
             ecb.SetComponent(marbleEntity, new CellIndex(cellPosition));

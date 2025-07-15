@@ -3,6 +3,7 @@ using Unity.Collections;
 using Unity.Burst;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 using MarbleMaker.Core.ECS;
 using MarbleMaker.Core.Math;
 using static Unity.Entities.SystemAPI;
@@ -19,8 +20,8 @@ namespace MarbleMaker.Core.ECS
     [BurstCompile]
     public partial struct CollisionDetectSystem : ISystem
     {
-        // System hash for error reporting
-        private static readonly int k_SystemHash = math.hash(nameof(CollisionDetectSystem));
+        // System hash for error reporting (stable across platforms)
+        private static readonly int k_SystemHash = UnityEngine.Hash128.Compute(nameof(CollisionDetectSystem)).GetHashCode();
 
             // Persistent containers for performance
     private NativeParallelMultiHashMap<ulong, MarbleHandle> cellHash;
@@ -113,7 +114,7 @@ namespace MarbleMaker.Core.ECS
                 ecb = ecb,
                 faults = faultQueue.AsParallelWriter()
             };
-            var processHandle = processCollisionJob.ScheduleParallel(collisionPairs.Length, 1, collisionPairsHandle);
+            var processHandle = IJobParallelForExtensions.Schedule(processCollisionJob, collisionPairs.Length, 1, collisionPairsHandle);
 
             // Step 6: Clean up temporary containers
             var disposer = new DisposableContainer(Allocator.TempJob);

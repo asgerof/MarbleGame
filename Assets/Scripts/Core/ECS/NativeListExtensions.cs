@@ -7,6 +7,7 @@ namespace MarbleMaker.Core.ECS
     /// <summary>
     /// Extension methods for Unity.Collections native containers
     /// </summary>
+    [BurstCompile]
     public static class NativeListExtensions
     {
         /// <summary>
