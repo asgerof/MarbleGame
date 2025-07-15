@@ -85,7 +85,7 @@ namespace MarbleMaker.Core.ECS
                 // If overriding, set the override value to the opposite of current exit
                 if (splitterState.overrideExit)
                 {
-                    splitterState.overrideValue = splitterState.currentExit == 0 ? 1 : 0;
+                    splitterState.overrideValue = (byte)(splitterState.currentExit == 0 ? 1 : 0);
                 }
                 
                 ecb.SetComponent(targetEntity, splitterState);
