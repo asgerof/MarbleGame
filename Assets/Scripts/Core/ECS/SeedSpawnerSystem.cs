@@ -163,8 +163,8 @@ namespace MarbleMaker.Core.ECS
         /// <summary>
         /// Utility method for other systems to spawn marbles
         /// </summary>
-        public static void SpawnMarbleAtPosition(EntityCommandBuffer ecb, EntityArchetype marbleArchetype, 
-            int3 cellPosition, Fixed32 initialVelocity, long spawnTick)
+        public static void SpawnMarbleAtPosition(EntityCommandBuffer ecb, EntityArchetype marbleArchetype,
+            int3 cellPosition, Fixed32x3 initialVelocity, long spawnTick)
         {
             // Create marble entity
             var marbleEntity = ecb.CreateEntity(marbleArchetype);

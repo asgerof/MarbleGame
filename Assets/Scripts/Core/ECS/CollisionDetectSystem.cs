@@ -118,8 +118,8 @@ namespace MarbleMaker.Core.ECS
 
             // Step 6: Clean up temporary containers
             var disposer = new DisposableContainer(Allocator.TempJob);
-            disposer.Add(ref cellKeys, processHandle);
-            disposer.Add(ref collisionPairs, processHandle);
+            disposer.Add(cellKeys, processHandle);
+            disposer.Add(collisionPairs, processHandle);
             var disposeHandle = disposer.Flush(processHandle);
 
             // Process any faults on main thread (lightweight)

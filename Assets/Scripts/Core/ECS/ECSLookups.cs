@@ -16,13 +16,9 @@ namespace MarbleMaker.Core.ECS
         // -----------------------------------------------------------------------------
         // Burst-friendly comparer (no interface call)
         // -----------------------------------------------------------------------------
-        internal struct EntityIndexComparer
+        internal struct EntityIndexComparer : System.Collections.Generic.IComparer<Entity>
         {
-            // NativeArray.Sort(...) expects a static Compare(ref, ref) method
-            public static int Compare(ref Entity a, ref Entity b)
-            {
-                return a.Index.CompareTo(b.Index);
-            }
+            public int Compare(Entity x, Entity y) => x.Index.CompareTo(y.Index);
         }
         // Static caches for fast lookups
         static NativeParallelHashMap<ulong, Entity> _splittersByCell;

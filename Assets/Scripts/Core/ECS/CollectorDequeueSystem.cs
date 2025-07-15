@@ -41,8 +41,6 @@ namespace MarbleMaker.Core.ECS
             var marbleReleaseQueue = new NativeQueue<MarbleRelease>(Allocator.TempJob);
             var faultQueue = new NativeQueue<Fault>(Allocator.TempJob);
             
-            // Track capacity needs for next frame
-            int neededCapacity = 0;
             
             // Get ECB for marble movement - Updated for Unity ECS 1.3.14
             var ecbSingleton = GetSingleton<EndFixedStepSimulationEntityCommandBufferSystem.Singleton>();
@@ -109,9 +107,9 @@ namespace MarbleMaker.Core.ECS
                 {
                     // Note: This capacity change should happen on main thread
                     // For now, we'll work with what we have and let the system handle growth
-                    faultQueue.Enqueue(new Fault { 
-                        SystemId = math.hash(nameof(CollectorDequeueSystem)), 
-                        Code = 1 
+                    faultQueue.Enqueue(new Fault {
+                        SystemId = UnityEngine.Hash128.Compute(nameof(CollectorDequeueSystem)).GetHashCode(),
+                        Code = 1
                     });
                 }
                 state.CapacityMask = (uint)math.max(queue.Capacity - 1, 15);
