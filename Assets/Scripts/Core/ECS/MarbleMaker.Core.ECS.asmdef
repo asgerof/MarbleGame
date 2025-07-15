@@ -1,0 +1,21 @@
+{
+    "name": "MarbleMaker.Core.ECS",
+    "rootNamespace": "MarbleMaker.Core.ECS",
+    "references": [
+        "MarbleMaker.Core",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Mathematics",
+        "Unity.Physics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

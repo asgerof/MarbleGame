@@ -1,0 +1,358 @@
+/* MarbleMaker Light Theme */
+/* From UI docs: "Clean plastic surfaces + soft AO; minimal noise" */
+/* "USS ≈ CSS" and "runtime_variables.uss (--accent-color etc.)" */
+
+/* CSS Variables for theming */
+:root {
+    --accent-color: #4A90E2;
+    --primary-color: #2E86AB;
+    --secondary-color: #A23B72;
+    --background-color: #F5F5F5;
+    --surface-color: #FFFFFF;
+    --text-color: #333333;
+    --text-light-color: #666666;
+    --border-color: #E0E0E0;
+    --success-color: #27AE60;
+    --warning-color: #F39C12;
+    --error-color: #E74C3C;
+    
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    
+    /* Border Radius */
+    --border-radius-sm: 4px;
+    --border-radius-md: 8px;
+    --border-radius-lg: 12px;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Root Theme */
+.marble-maker-theme {
+    background-color: var(--background-color);
+    color: var(--text-color);
+    font-size: 14px;
+    width: 100%;
+    height: 100%;
+}
+
+/* Regions */
+.region {
+    background-color: var(--surface-color);
+    border-color: var(--border-color);
+    border-width: 1px;
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md);
+    margin: var(--spacing-sm);
+}
+
+.region-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--text-color);
+    margin-bottom: var(--spacing-sm);
+}
+
+/* Top Controls Region */
+.top-controls-region {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    height: 60px;
+    background-color: var(--surface-color);
+    border-bottom-width: 2px;
+    border-bottom-color: var(--border-color);
+    margin: 0;
+    border-radius: 0;
+}
+
+.controls-left,
+.controls-center,
+.controls-right {
+    flex-direction: row;
+    align-items: center;
+}
+
+.controls-center {
+    flex-grow: 1;
+    justify-content: center;
+}
+
+/* Control Buttons */
+.control-button {
+    width: 40px;
+    height: 40px;
+    margin: var(--spacing-xs);
+    border-radius: var(--border-radius-md);
+    background-color: var(--surface-color);
+    border-color: var(--border-color);
+    border-width: 1px;
+    color: var(--text-color);
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.control-button:hover {
+    background-color: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.control-button:active {
+    background-color: var(--primary-color);
+}
+
+.play-button {
+    color: var(--success-color);
+}
+
+.pause-button {
+    color: var(--warning-color);
+}
+
+.reset-button {
+    color: var(--error-color);
+}
+
+/* Currency Display */
+.currency-display {
+    flex-direction: column;
+    align-items: center;
+    margin: 0 var(--spacing-md);
+}
+
+.coin-label,
+.part-token-label {
+    font-size: 18px;
+    font-weight: bold;
+    color: var(--accent-color);
+}
+
+.currency-title {
+    font-size: 12px;
+    color: var(--text-light-color);
+}
+
+/* Status Labels */
+.status-label {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--text-color);
+    margin: 0 var(--spacing-md);
+}
+
+.tick-label {
+    font-size: 14px;
+    color: var(--text-light-color);
+    margin: 0 var(--spacing-sm);
+}
+
+/* Main Content Layout */
+.main-content {
+    flex-direction: row;
+    flex-grow: 1;
+}
+
+/* Parts Tray Region */
+.parts-tray-region {
+    width: 250px;
+    flex-shrink: 0;
+}
+
+.parts-list {
+    flex-grow: 1;
+    background-color: var(--background-color);
+    border-radius: var(--border-radius-sm);
+    border-color: var(--border-color);
+    border-width: 1px;
+    margin: var(--spacing-sm) 0;
+}
+
+.parts-count {
+    font-size: 12px;
+    color: var(--text-light-color);
+    text-align: center;
+}
+
+/* Parts List Items */
+.tray-slot {
+    flex-direction: row;
+    align-items: center;
+    padding: var(--spacing-sm);
+    margin: var(--spacing-xs);
+    background-color: var(--surface-color);
+    border-radius: var(--border-radius-sm);
+    border-color: var(--border-color);
+    border-width: 1px;
+}
+
+.tray-slot:hover {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+.part-icon {
+    width: 32px;
+    height: 32px;
+    margin-right: var(--spacing-sm);
+    background-color: var(--background-color);
+    border-radius: var(--border-radius-sm);
+}
+
+.part-label {
+    flex-grow: 1;
+    font-size: 14px;
+}
+
+/* Game View Region */
+.game-view-region {
+    flex-grow: 1;
+    background-color: #2C3E50;
+    border-radius: var(--border-radius-md);
+    margin: var(--spacing-sm);
+    position: relative;
+}
+
+/* Inspector Region */
+.inspector-region {
+    width: 300px;
+    flex-shrink: 0;
+}
+
+.selection-info {
+    margin-bottom: var(--spacing-md);
+}
+
+.selected-part-name {
+    font-size: 16px;
+    font-weight: bold;
+    color: var(--text-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.upgrade-level {
+    font-size: 14px;
+    color: var(--text-light-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.position-info {
+    font-size: 12px;
+    color: var(--text-light-color);
+}
+
+.upgrade-controls {
+    margin-bottom: var(--spacing-md);
+}
+
+.upgrade-button {
+    width: 100%;
+    height: 40px;
+    background-color: var(--accent-color);
+    color: white;
+    border-radius: var(--border-radius-md);
+    border-width: 0;
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: var(--spacing-sm);
+}
+
+.upgrade-button:hover {
+    background-color: var(--primary-color);
+}
+
+.upgrade-button:disabled {
+    background-color: var(--border-color);
+    color: var(--text-light-color);
+}
+
+.upgrade-cost {
+    font-size: 12px;
+    color: var(--text-light-color);
+    text-align: center;
+}
+
+.interaction-hint {
+    font-size: 12px;
+    color: var(--accent-color);
+    font-style: italic;
+    text-align: center;
+    background-color: var(--background-color);
+    padding: var(--spacing-sm);
+    border-radius: var(--border-radius-sm);
+}
+
+/* Modal Region */
+.modal-region {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: transparent;
+    pointer-events: none;
+    border-width: 0;
+    padding: 0;
+    margin: 0;
+}
+
+/* Tooltip */
+.tooltip {
+    position: absolute;
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: var(--spacing-sm);
+    border-radius: var(--border-radius-sm);
+    font-size: 12px;
+    pointer-events: none;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out;
+}
+
+.tooltip-text {
+    color: white;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+/* Animations */
+.region {
+    transition: background-color 0.2s ease-in-out;
+}
+
+.control-button {
+    transition: all 0.2s ease-in-out;
+}
+
+.tray-slot {
+    transition: all 0.2s ease-in-out;
+}
+
+.upgrade-button {
+    transition: all 0.2s ease-in-out;
+}
+
+/* Responsive adjustments for Steam Deck */
+@media (max-width: 1280px) {
+    .parts-tray-region {
+        width: 200px;
+    }
+    
+    .inspector-region {
+        width: 250px;
+    }
+    
+    .control-button {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+    }
+}

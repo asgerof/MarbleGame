@@ -1,0 +1,23 @@
+{
+    "name": "MarbleMaker.Core.UI",
+    "rootNamespace": "MarbleMaker.Core.UI",
+    "references": [
+        "MarbleMaker.Core",
+        "MarbleMaker.Core.ECS",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Burst",
+        "Unity.Mathematics",
+        "Unity.InputSystem",
+        "Unity.Nuget.Newtonsoft-Json"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

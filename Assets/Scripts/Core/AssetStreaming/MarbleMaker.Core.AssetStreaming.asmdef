@@ -1,0 +1,21 @@
+{
+    "name": "MarbleMaker.Core.AssetStreaming",
+    "rootNamespace": "MarbleMaker.Core.AssetStreaming",
+    "references": [
+        "MarbleMaker.Core",
+        "MarbleMaker.Core.UI",
+        "Unity.Addressables",
+        "Unity.ResourceManager",
+        "Unity.Mathematics",
+        "Unity.Burst"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
