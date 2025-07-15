@@ -15,7 +15,7 @@ Translate the design rules in the GDD into a concrete, build-ready technical pla
 
 | Item               | Decision                                                                                | Rationale                                                                                                                    |
 | ------------------ | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Primary Engine** | **Unity 2024 LTS** (Entities 1.x, Burst 2.x)                                            | Mature asset pipeline, easy multi-platform export (PC, Steam Deck, Switch), large hiring pool, proven Workshop integrations. |
+| **Primary Engine** | **Unity 6.1** (6000.1.11f1, Entities 1.x, Burst 2.x)                                     | Mature asset pipeline, easy multi-platform export (PC, Steam Deck, Switch), large hiring pool, proven Workshop integrations. |
 | **Core Language**  | **C#** (HPC# subset where Burst-optimised)                                              | Safe memory model + deterministic numeric behaviour with fixed-point structs; Burst auto-vectorises hot loops.               |
 | **Shaders**        | HLSL via Unity Shader Graph (URP)                                                       | Cross-platform, lightweight; URP's forward renderer is sufficient for our stylised visuals.                                  |
 | **Scripting**      | No third-party physics; marble motion is a custom DOTS system to guarantee determinism. |                                                                                                                              |

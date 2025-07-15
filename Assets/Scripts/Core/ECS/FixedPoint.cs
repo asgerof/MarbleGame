@@ -26,7 +26,7 @@ namespace MarbleMaker.Core.ECS
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long Mul(long a, long b)
         {
-#if UNITY_2024_1_OR_NEWER
+#if UNITY_6000_1_OR_NEWER
             // Use 128-bit arithmetic when available
             return (long)((Int128)a * b >> FRACTIONAL_BITS);
 #else
@@ -63,7 +63,7 @@ namespace MarbleMaker.Core.ECS
         {
             if (b == 0) return 0;            // avoid /0 in release
 
-#if UNITY_2024_1_OR_NEWER           // Int128 path
+#if UNITY_6000_1_OR_NEWER           // Int128 path
             // (a << 32) / b  — do the shift first!
             return (long)(((Int128)a << FRACTIONAL_BITS) / b);
 #else                               // fallback for older Unity with proper signed handling
